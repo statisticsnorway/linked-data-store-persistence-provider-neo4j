@@ -1,8 +1,8 @@
 package no.ssb.lds.core.persistence.neo4j;
 
-import no.ssb.lds.api.persistence.Persistence;
 import no.ssb.lds.api.persistence.PersistenceInitializer;
 import no.ssb.lds.api.persistence.ProviderName;
+import no.ssb.lds.api.persistence.json.JsonPersistence;
 import org.neo4j.driver.v1.AuthTokens;
 import org.neo4j.driver.v1.Driver;
 import org.neo4j.driver.v1.GraphDatabase;
@@ -39,14 +39,19 @@ public class Neo4jInitializer implements PersistenceInitializer {
     }
 
     @Override
-    public Persistence initialize(String defaultNamespace, Map<String, String> configuration, Set<String> managedDomains) {
+    public JsonPersistence initialize(String defaultNamespace, Map<String, String> configuration, Set<String> managedDomains) {
         JavaUtilLoggingInitializer.initialize();
         String neo4jDriverURL = configuration.get("neo4j.driver.url");
         String neo4jDriverUsername = configuration.get("neo4j.driver.username");
         String neo4jDriverPassword = configuration.get("neo4j.driver.password");
         boolean logCypher = Boolean.parseBoolean(configuration.get("neo4j.cypher.show"));
         Driver driver = open(neo4jDriverURL, neo4jDriverUsername, neo4jDriverPassword);
-        return new Neo4JCORDPersistence(new Neo4jPersistenceProvider(driver, defaultNamespace, managedDomains, logCypher), logCypher);
+        Neo4jTransactionFactory transactionFactory = new Neo4jTransactionFactory(driver, logCypher);
+        try (Neo4jTransaction tx = transactionFactory.createTransaction(false)) {
+            Neo4jIndexManagement indexManagement = new Neo4jIndexManagement(tx, defaultNamespace, managedDomains);
+            indexManagement.createMissingIndices(tx);
+        }
+        return new Neo4jPersistence(transactionFactory);
     }
 
     private static Driver open(String neo4jDriverURL, String neo4jDriverUsername, String neo4jDriverPassword) {

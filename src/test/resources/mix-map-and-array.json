@@ -1,0 +1,50 @@
+{
+  "name": {
+    "first": "John",
+    "last": "Smith"
+  },
+  "child": [
+    {
+      "name": "Kate",
+      "born": 1998,
+      "friend": [
+        {
+          "since": "2016-05-12",
+          "link": "/Person/jane"
+        },
+        {
+          "since": "2004-01-03",
+          "link": "/Person/hanna"
+        }
+      ]
+    },
+    {
+      "name": "Jack",
+      "born": 2001,
+      "friend": [
+        {
+          "since": "2016-05-12",
+          "link": "/Person/rob"
+        }
+      ]
+    },
+    {
+      "name": "Ben",
+      "born": 2004,
+      "friend": [
+        {
+          "since": "2014-08-30",
+          "link": "/Person/joan"
+        },
+        {
+          "since": "2012-02-30",
+          "link": "/Person/bob"
+        },
+        {
+          "since": "2015-09-02",
+          "link": "/Person/nate"
+        }
+      ]
+    }
+  ]
+}

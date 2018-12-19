@@ -1,0 +1,16 @@
+version: '3.3'
+
+services:
+
+  db-neo4j:
+    image: neo4j:3.4
+    ports:
+    - "7474:7474"
+    - "7687:7687"
+    volumes:
+    - ldsneo4jdb:/data
+    environment:
+    - NEO4J_AUTH=neo4j/PasSW0rd
+
+volumes:
+  ldsneo4jdb:
