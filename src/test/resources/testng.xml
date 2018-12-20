@@ -1,0 +1,10 @@
+<!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd" >
+<suite name="tests">
+
+    <test name="default">
+        <classes>
+            <class name="no.ssb.lds.core.persistence.neo4j.Neo4jPersistenceTest" />
+        </classes>
+    </test>
+
+</suite>
