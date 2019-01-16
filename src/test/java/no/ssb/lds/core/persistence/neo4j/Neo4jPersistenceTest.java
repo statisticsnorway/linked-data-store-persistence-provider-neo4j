@@ -18,10 +18,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static no.ssb.lds.core.persistence.test.SpecificationBuilder.arrayNode;
-import static no.ssb.lds.core.persistence.test.SpecificationBuilder.createSpecificationAndRoot;
-import static no.ssb.lds.core.persistence.test.SpecificationBuilder.objectNode;
-import static no.ssb.lds.core.persistence.test.SpecificationBuilder.stringNode;
+import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.arrayNode;
+import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.createSpecificationAndRoot;
+import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.objectNode;
+import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.stringNode;
 
 /*
  * Unit tests meant to debug/verify Neo4j persistence provider without running the neo4j database.
