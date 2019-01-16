@@ -36,7 +36,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -78,7 +77,7 @@ public class Neo4jPersistence implements JsonPersistence {
     static String traverseSpecificationAndGenerateCypherCreateStatement(SpecificationElement specificationElement, Map<String, Object> params, DocumentKey key, JsonNode node) {
         StringBuilder cypher = new StringBuilder();
         cypher.append("MERGE (r:").append(key.entity()).append(" {id: $rid}) WITH r\n");
-        cypher.append("OPTIONAL MATCH (r:").append(key.entity()).append(")-[v:VERSION {from: $version}]->()-[:EMBED*]->(e) DETACH DELETE e WITH r\n");
+        cypher.append("OPTIONAL MATCH (r:").append(key.entity()).append(")-[v:VERSION {from: $version}]->(m)-[:EMBED*]->(e) DETACH DELETE m, e WITH r\n");
         cypher.append("OPTIONAL MATCH (r:").append(key.entity()).append(")-[v:VERSION]->() WHERE v.from <= $version AND $version < v.to WITH r, v AS prevVersion\n");
         cypher.append("OPTIONAL MATCH (r:").append(key.entity()).append(")-[v:VERSION]->() WHERE v.from > $version WITH r, prevVersion, v AS nextVersion ORDER BY v.from LIMIT 1\n");
         cypher.append("FOREACH(d IN $data |\n");
@@ -247,7 +246,7 @@ public class Neo4jPersistence implements JsonPersistence {
         params.put("rid", id);
         params.put("snapshot", snapshot);
         cypher.append("MATCH (r :").append(entity).append(" {id: $rid})-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to ");
-        cypher.append("WITH r, v, m OPTIONAL MATCH (m)-[:EMBED*]->(e) RETURN r, v, m, e");
+        cypher.append("WITH r, v, m OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
         StatementResult statementResult = tx.executeCypher(cypher.toString(), params);
         List<JsonDocument> list = assembleDocumentFromVersionAndEmbeddedNodes(namespace, entity, statementResult);
         if (list.isEmpty()) {
@@ -260,13 +259,14 @@ public class Neo4jPersistence implements JsonPersistence {
         return CompletableFuture.completedFuture(list.get(0));
     }
 
-    private List<JsonDocument> assembleDocumentFromVersionAndEmbeddedNodes(String namespace, String entity, StatementResult statementResult) {
+    private static List<JsonDocument> assembleDocumentFromVersionAndEmbeddedNodes(String namespace, String entity, StatementResult statementResult) {
         List<JsonDocument> result = new ArrayList<>();
         Map<String, FlattenedDocumentLeafNode> leafNodesByPath = new TreeMap<>();
         DocumentKey documentKey = null;
         long versionRelationshipId = Long.MIN_VALUE;
         boolean deleted = false;
         String id = null;
+        String pathWithIndices = null;
         while (statementResult.hasNext()) {
             Record record = statementResult.next();
             for (Pair<String, Value> field : record.fields()) {
@@ -279,6 +279,7 @@ public class Neo4jPersistence implements JsonPersistence {
                         result.add(document);
                         leafNodesByPath.clear();
                         deleted = false;
+                        pathWithIndices = null;
                         documentKey = null;
                     }
                     id = rid;
@@ -294,28 +295,57 @@ public class Neo4jPersistence implements JsonPersistence {
                             // new version
                             JsonDocument document = createJsonDocument(leafNodesByPath, documentKey, deleted);
                             result.add(document);
-                            documentKey = new DocumentKey(namespace, entity, id, version);
                             leafNodesByPath.clear();
                             deleted = false;
+                            pathWithIndices = null;
+                            documentKey = new DocumentKey(namespace, entity, id, version);
                         }
                     }
-                } else if (Set.of("m", "e").contains(key)) {
+                } else if ("l".equals(key)) {
+                    if (!field.value().isNull()) {
+                        List<Relationship> embeds = field.value().asList(v -> v.asRelationship());
+                        StringBuilder sb = new StringBuilder("$");
+                        for (Relationship embedRel : embeds) {
+                            String pathElement = embedRel.get("path").asString();
+                            if ("[]".equals(pathElement)) {
+                                int index = embedRel.get("index").asNumber().intValue();
+                                sb.append("[").append(index).append("]");
+                            } else {
+                                sb.append(".").append(pathElement);
+                            }
+                        }
+                        pathWithIndices = sb.toString();
+                    }
+                } else if ("m".equals(key)) {
                     Value value = field.value();
                     if ("m".equals(key)) {
                         if (value.asNode().containsKey("deleted")) {
                             Value deleteMarkerValue = value.get("deleted");
                             deleted = deleteMarkerValue.asBoolean(false);
                         }
-                    } else if (value.isNull()) {
+                    }
+                } else if ("e".equals(key)) {
+                    Value value = field.value();
+                    if (value.isNull()) {
                         continue;
                     }
                     Value pathValue = value.asNode().get("path");
-                    String path = pathValue.asString();
+                    String pathWithoutIndices = pathValue.asString();
+                    if (pathWithIndices == null) {
+                        throw new IllegalStateException("Unable to determine path with indices");
+                    }
                     Value typeValue = value.asNode().get("type");
                     String type = typeValue.asString();
                     Value valueValue = value.asNode().get("value");
                     if ("string".equals(type)) {
-                        leafNodesByPath.put(pathValue.asString(), new FlattenedDocumentLeafNode(documentKey, path, FragmentType.STRING, valueValue.asString(), Integer.MAX_VALUE));
+                        String stringValue = valueValue.asString();
+                        leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.STRING, stringValue, Integer.MAX_VALUE));
+                    } else if ("numeric".equals(type)) {
+                        String stringValue = String.valueOf(valueValue.asNumber());
+                        leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.NUMERIC, stringValue, Integer.MAX_VALUE));
+                    } else if ("boolean".equals(type)) {
+                        String stringValue = String.valueOf(valueValue.asBoolean());
+                        leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.BOOLEAN, stringValue, Integer.MAX_VALUE));
                     } else if ("map".equals(type)) {
                         // TODO identify empty-map and create leaf-node
                     } else if ("array".equals(type)) {
@@ -334,7 +364,7 @@ public class Neo4jPersistence implements JsonPersistence {
         return result;
     }
 
-    private JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath, DocumentKey documentKey, boolean deleted) {
+    private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath, DocumentKey documentKey, boolean deleted) {
         FlattenedDocument flattenedDocument = new FlattenedDocument(documentKey, leafNodesByPath, deleted);
         JSONObject jsonObject = new FlattenedDocumentToJson(flattenedDocument).toJSONObject();
         return new JsonDocument(documentKey, jsonObject);
@@ -354,7 +384,7 @@ public class Neo4jPersistence implements JsonPersistence {
         cypher.append("MATCH (r :").append(entity).append(" {id: $rid})-[v:VERSION]->(m) WHERE v.from <= $snapshotFrom AND $snapshotFrom < v.to\n");
         cypher.append("WITH r, v.from AS firstVersion\n");
         cypher.append("MATCH (r)-[v:VERSION]->(m) WHERE firstVersion <= v.from AND v.from < $snapshotTo\n");
-        cypher.append("WITH r, v, m ORDER BY v.from LIMIT $limit OPTIONAL MATCH (m)-[:EMBED*]->(e) RETURN r, v, m, e");
+        cypher.append("WITH r, v, m ORDER BY v.from LIMIT $limit OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
         StatementResult statementResult = tx.executeCypher(cypher.toString(), params);
         List<JsonDocument> result = assembleDocumentFromVersionAndEmbeddedNodes(namespace, entity, statementResult);
         return CompletableFuture.completedFuture(result);
@@ -368,7 +398,7 @@ public class Neo4jPersistence implements JsonPersistence {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("rid", id);
         params.put("limit", limit);
-        cypher.append("MATCH (r :").append(entity).append(" {id: $rid})-[v:VERSION]->(m) WITH r, v, m ORDER BY v.from LIMIT $limit OPTIONAL MATCH (m)-[:EMBED*]->(e) RETURN r, v, m, e");
+        cypher.append("MATCH (r :").append(entity).append(" {id: $rid})-[v:VERSION]->(m) WITH r, v, m ORDER BY v.from LIMIT $limit OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
         StatementResult statementResult = tx.executeCypher(cypher.toString(), params);
         return CompletableFuture.completedFuture(assembleDocumentFromVersionAndEmbeddedNodes(namespace, entity, statementResult));
     }
@@ -420,7 +450,7 @@ public class Neo4jPersistence implements JsonPersistence {
         cypher.append("MATCH (r :").append(entity).append(") WITH r ORDER BY r.id LIMIT $limit\n");
         cypher.append("MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to ");
         cypher.append("WITH r, v, m ");
-        cypher.append("OPTIONAL MATCH (m)-[:EMBED*]->(e) RETURN r, v, m, e");
+        cypher.append("OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
         StatementResult statementResult = tx.executeCypher(cypher.toString(), params);
         return CompletableFuture.completedFuture(assembleDocumentFromVersionAndEmbeddedNodes(namespace, entity, statementResult));
     }
@@ -456,7 +486,7 @@ public class Neo4jPersistence implements JsonPersistence {
         }
         cypher.append("MATCH (e :").append(entity).append("_E {path: $path, hashOrValue: $value})<-[:EMBED*]-(m)<-[v:VERSION]-(r) ");
         cypher.append("WHERE v.from <= $snapshot AND $snapshot < v.to WITH r, v, m ORDER BY r.id LIMIT $limit\n");
-        cypher.append("OPTIONAL MATCH (m)-[:EMBED*]->(e) RETURN r, v, m, e");
+        cypher.append("OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
         StatementResult statementResult = tx.executeCypher(cypher.toString(), params);
         return CompletableFuture.completedFuture(assembleDocumentFromVersionAndEmbeddedNodes(namespace, entity, statementResult));
     }
