@@ -13,6 +13,7 @@ import no.ssb.lds.api.persistence.json.FlattenedDocumentToJson;
 import no.ssb.lds.api.persistence.json.JsonDocument;
 import no.ssb.lds.api.persistence.json.JsonPersistence;
 import no.ssb.lds.api.persistence.streaming.FragmentType;
+import no.ssb.lds.api.persistence.streaming.Persistence;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElement;
 import no.ssb.lds.api.specification.SpecificationElementType;
@@ -47,6 +48,11 @@ public class Neo4jPersistence implements JsonPersistence {
 
     public Neo4jPersistence(Neo4jTransactionFactory transactionFactory) {
         this.transactionFactory = transactionFactory;
+    }
+
+    @Override
+    public Persistence getPersistence() {
+        throw new UnsupportedOperationException("GraphQL feature not implemented!");
     }
 
     @Override
