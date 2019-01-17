@@ -102,8 +102,12 @@ public class Neo4jPersistence implements JsonPersistence {
         cypher.append(indentation).append("FOREACH(d").append(depth).append(" IN ").append(dataListIdentifier).append(" |\n");
         indentation += "  ";
         dataListIdentifier = "d" + depth;
-        cypher.append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:EMBED {path: '").append(element.getName()).append("'");
+        String relationPath = element.getName();
         boolean parentIsArray = isArrayElementNode(nodeIdentifier);
+        if (parentIsArray) {
+            relationPath = "[]";
+        }
+        cypher.append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:EMBED {path: '").append(relationPath).append("'");
         if (parentIsArray) {
             cypher.append(", index: ").append(dataListIdentifier).append("[0]");
         }
@@ -165,7 +169,11 @@ public class Neo4jPersistence implements JsonPersistence {
         Deque<String> parts = new LinkedList<>();
         SpecificationElement e = element;
         while (!SpecificationElementType.MANAGED.equals(e.getSpecificationElementType())) {
-            parts.addFirst(e.getName());
+            if (e.getParent().getJsonTypes().contains("array")) {
+                parts.addFirst("[]");
+            } else {
+                parts.addFirst(e.getName());
+            }
             e = e.getParent();
         }
         parts.addFirst("$");
