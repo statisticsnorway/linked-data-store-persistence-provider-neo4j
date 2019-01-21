@@ -139,7 +139,7 @@ public class Neo4jPersistence implements JsonPersistence {
             cypher.append("(").append(nodeIdentifier).append(":").append(entity).append("_E {");
 
             // type property
-            String jsonType = element.getJsonTypes().contains("string") ? "string" : element.getJsonTypes().contains("numeric") ? "numeric" : element.getJsonTypes().contains("boolean") ? "boolean" : element.getJsonTypes().stream().collect(Collectors.joining(","));
+            String jsonType = element.getJsonTypes().contains("string") ? "string" : element.getJsonTypes().contains("number") ? "number" : element.getJsonTypes().contains("boolean") ? "boolean" : element.getJsonTypes().stream().collect(Collectors.joining(","));
             cypher.append("type: '").append(jsonType).append("'");
 
             // path property
@@ -354,7 +354,7 @@ public class Neo4jPersistence implements JsonPersistence {
                     if ("string".equals(type)) {
                         String stringValue = valueValue.asString();
                         leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.STRING, stringValue, Integer.MAX_VALUE));
-                    } else if ("numeric".equals(type)) {
+                    } else if ("number".equals(type)) {
                         String stringValue = String.valueOf(valueValue.asNumber());
                         leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.NUMERIC, stringValue, Integer.MAX_VALUE));
                     } else if ("boolean".equals(type)) {
