@@ -4,7 +4,7 @@
 
     <groupId>no.ssb.lds</groupId>
     <artifactId>linked-data-store-persistence-provider-neo4j</artifactId>
-    <version>0.6</version>
+    <version>0.7-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>LinkedDataStore Neo4j persistence-provider</name>
     <description>LinkedDataStore In-memory persistence-provider</description>
@@ -45,7 +45,7 @@
         <connection>scm:git:git://github.com/statisticsnorway/linked-data-store-persistence-provider-neo4j.git</connection>
         <developerConnection>scm:git:git@github.com:statisticsnorway/linked-data-store-persistence-provider-neo4j.git</developerConnection>
         <url>https://github.com/statisticsnorway/linked-data-store-persistence-provider-neo4j/tree/master</url>
-        <tag>v0.6</tag>
+        <tag>HEAD</tag>
     </scm>
 
     <distributionManagement>
