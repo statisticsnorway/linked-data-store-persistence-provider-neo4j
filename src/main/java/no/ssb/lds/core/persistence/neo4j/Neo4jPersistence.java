@@ -388,6 +388,9 @@ public class Neo4jPersistence implements JsonPersistence {
     public CompletableFuture<Iterable<JsonDocument>> readVersions(Transaction transaction, ZonedDateTime
             snapshotFrom, ZonedDateTime snapshotTo, String namespace, String entity, String id, ZonedDateTime firstVersion, int limit) throws
             PersistenceException {
+        if (snapshotFrom.isAfter(snapshotTo)) {
+            throw new IllegalArgumentException("Negative time period! snapshotFrom must come before snapshotTo");
+        }
         Neo4jTransaction tx = (Neo4jTransaction) transaction;
         StringBuilder cypher = new StringBuilder();
         Map<String, Object> params = new LinkedHashMap<>();
