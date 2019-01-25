@@ -12,6 +12,7 @@ import no.ssb.lds.api.persistence.flattened.FlattenedDocumentLeafNode;
 import no.ssb.lds.api.persistence.json.FlattenedDocumentToJson;
 import no.ssb.lds.api.persistence.json.JsonDocument;
 import no.ssb.lds.api.persistence.json.JsonPersistence;
+import no.ssb.lds.api.persistence.reactivex.RxJsonPersistence;
 import no.ssb.lds.api.persistence.streaming.FragmentType;
 import no.ssb.lds.api.persistence.streaming.Persistence;
 import no.ssb.lds.api.specification.Specification;
@@ -41,7 +42,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
-public class Neo4jPersistence implements JsonPersistence {
+public class Neo4jPersistence implements RxJsonPersistence {
 
     final ObjectMapper mapper = new ObjectMapper();
     final Neo4jTransactionFactory transactionFactory;
