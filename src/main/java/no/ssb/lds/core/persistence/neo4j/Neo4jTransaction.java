@@ -44,6 +44,10 @@ class Neo4jTransaction implements Transaction {
         return result;
     }
 
+    org.neo4j.driver.v1.Transaction getNeo4jTransaction() {
+        return this.neo4jTransaction;
+    }
+
     StatementResult executeCypher(String query, Object... keysAndValues) {
         LinkedHashMap<String, Object> params = new LinkedHashMap<>();
         for (int i = 0; i < keysAndValues.length; i += 2) {
