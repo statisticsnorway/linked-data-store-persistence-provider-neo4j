@@ -1,13 +1,20 @@
 package no.ssb.lds.core.persistence.neo4j;
 
+import io.reactivex.BackpressureStrategy;
+import io.reactivex.Flowable;
+import io.reactivex.Single;
 import no.ssb.lds.api.persistence.Transaction;
 import no.ssb.lds.api.persistence.TransactionStatistics;
+import org.neo4j.driver.v1.Record;
 import org.neo4j.driver.v1.Session;
 import org.neo4j.driver.v1.StatementResult;
+import org.neo4j.driver.v1.StatementResultCursor;
+import org.neo4j.driver.v1.summary.ResultSummary;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 class Neo4jTransaction implements Transaction {
 
@@ -56,6 +63,32 @@ class Neo4jTransaction implements Transaction {
             params.put(key, value);
         }
         return executeCypher(query, params);
+    }
+
+    Flowable<Record> executeCypherAsync(String query, Map<String, Object> parameters) {
+        if (logCypher) {
+            System.out.format("\n:: CYPHER (ASYNC) ::\n%s\n", query);
+            System.out.format(":: DATA ::\n%s\n", parameters);
+        }
+        return Flowable.create(emitter -> {
+            CompletionStage<StatementResultCursor> cursor = neo4jTransaction.runAsync(query, parameters);
+            cursor.whenComplete((resultCursor, runThrowable) -> {
+                if (runThrowable != null) {
+                    emitter.onError(runThrowable);
+                } else {
+                    CompletionStage<ResultSummary> cs = resultCursor.forEachAsync(emitter::onNext);
+                    cs.whenComplete((resultSummary, throwable) -> {
+                        if (throwable != null) {
+                            emitter.onError(throwable);
+                        } else {
+                            emitter.onComplete();
+                        }
+                    });
+                }
+
+            });
+
+        }, BackpressureStrategy.BUFFER);
     }
 
     StatementResult executeCypher(String query, Map<String, Object> params) {
