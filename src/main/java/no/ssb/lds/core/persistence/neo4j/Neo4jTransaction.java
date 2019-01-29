@@ -76,6 +76,8 @@ class Neo4jTransaction implements Transaction {
                 if (runThrowable != null) {
                     emitter.onError(runThrowable);
                 } else {
+                    // Note, forEachAsync unwrap the series of nextAsync() using whenCompleteAsync. This is why the
+                    // calling thread comes from ForkJoinPool.
                     CompletionStage<ResultSummary> cs = resultCursor.forEachAsync(emitter::onNext);
                     cs.whenComplete((resultSummary, throwable) -> {
                         if (throwable != null) {

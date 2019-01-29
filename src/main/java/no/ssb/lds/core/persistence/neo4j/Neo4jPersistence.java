@@ -24,6 +24,7 @@ import org.json.JSONObject;
 import org.neo4j.driver.v1.Record;
 import org.neo4j.driver.v1.StatementResult;
 import org.neo4j.driver.v1.Value;
+import org.neo4j.driver.v1.types.Node;
 import org.neo4j.driver.v1.types.Relationship;
 import org.neo4j.driver.v1.util.Pair;
 
@@ -32,7 +33,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -224,6 +224,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         return sb.toString();
     }
 
+    @Deprecated
     private static List<JsonDocument> assembleDocumentFromVersionAndEmbeddedNodes(String namespace, String entity, StatementResult statementResult) {
         List<JsonDocument> result = new ArrayList<>();
         Map<String, FlattenedDocumentLeafNode> leafNodesByPath = new TreeMap<>();
@@ -269,17 +270,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
                 } else if ("l".equals(key)) {
                     if (!field.value().isNull()) {
                         List<Relationship> embeds = field.value().asList(v -> v.asRelationship());
-                        StringBuilder sb = new StringBuilder("$");
-                        for (Relationship embedRel : embeds) {
-                            String pathElement = embedRel.get("path").asString();
-                            if ("[]".equals(pathElement)) {
-                                int index = embedRel.get("index").asNumber().intValue();
-                                sb.append("[").append(index).append("]");
-                            } else {
-                                sb.append(".").append(pathElement);
-                            }
-                        }
-                        pathWithIndices = sb.toString();
+                        pathWithIndices = computePath(embeds);
                     }
                 } else if ("m".equals(key)) {
                     Value value = field.value();
@@ -294,8 +285,6 @@ public class Neo4jPersistence implements RxJsonPersistence {
                     if (value.isNull()) {
                         continue;
                     }
-                    Value pathValue = value.asNode().get("path");
-                    String pathWithoutIndices = pathValue.asString();
                     if (pathWithIndices == null) {
                         throw new IllegalStateException("Unable to determine path with indices");
                     }
@@ -329,10 +318,97 @@ public class Neo4jPersistence implements RxJsonPersistence {
         return result;
     }
 
-    private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath, DocumentKey documentKey, boolean deleted) {
+    private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath,
+                                                   DocumentKey documentKey, boolean deleted) {
         FlattenedDocument flattenedDocument = new FlattenedDocument(documentKey, leafNodesByPath, deleted);
         JSONObject jsonObject = new FlattenedDocumentToJson(flattenedDocument).toJSONObject();
         return new JsonDocument(documentKey, jsonObject);
+    }
+
+    /**
+     * Compute path from Record.
+     */
+    static String getPathFromRecord(Record record) {
+        Node rootNode = record.get("m").asNode();
+        if (rootNode.containsKey("deleted") && rootNode.get("deleted").asBoolean(false)) {
+            // Empty path if deleted.
+            return "$";
+        } else {
+            List<Relationship> embeds = record.get("l").asList(Value::asRelationship);
+            return computePath(embeds);
+        }
+    }
+
+    static FlattenedDocumentLeafNode getLeafFromRecord(Record record, DocumentKey documentKey) {
+
+        Node rootNode = record.get("m").asNode();
+        if (rootNode.containsKey("deleted") && rootNode.get("deleted").asBoolean(false)) {
+            return new FlattenedDocumentLeafNode(documentKey, null, FragmentType.DELETED, null, Integer.MAX_VALUE);
+        }
+
+        String pathWithIndices = getPathFromRecord(record);
+
+        Value value = record.get("e");
+        if (value.isNull()) {
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.NULL, null, Integer.MAX_VALUE);
+        }
+
+        Value typeValue = value.asNode().get("type");
+        String type = typeValue.asString();
+        Value valueValue = value.asNode().get("value");
+        if ("string".equals(type)) {
+            String stringValue = valueValue.asString();
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.STRING, stringValue, Integer.MAX_VALUE);
+        } else if ("numeric".equals(type)) {
+            String stringValue = String.valueOf(valueValue.asNumber());
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.NUMERIC, stringValue, Integer.MAX_VALUE);
+        } else if ("boolean".equals(type)) {
+            String stringValue = String.valueOf(valueValue.asBoolean());
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.BOOLEAN, stringValue, Integer.MAX_VALUE);
+        } else if ("map".equals(type)) {
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.EMPTY_OBJECT, null, Integer.MAX_VALUE);
+        } else if ("array".equals(type)) {
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.EMPTY_ARRAY, null, Integer.MAX_VALUE);
+        } else {
+            throw new IllegalStateException("type not supported: " + typeValue.asString());
+        }
+    }
+
+    static DocumentKey getKeyFromRecord(Record record, String nameSpace, String entityName) {
+        String docId = record.get("r").get("id").asString();
+        ZonedDateTime version = record.get("v").get("from").asZonedDateTime();
+        return new DocumentKey(nameSpace, entityName, docId, version);
+    }
+
+    static Flowable<JsonDocument> toDocuments(Flowable<Record> records, String nameSpace, String entityName) {
+        return records.groupBy(record -> {
+            // Group by
+            return getKeyFromRecord(record, nameSpace, entityName);
+        }).concatMapSingle(recordById -> {
+            // For each group create a
+            DocumentKey key = recordById.getKey();
+            return recordById.toMap(record -> {
+                // Compute path.
+                return getPathFromRecord(record);
+            }, record -> getLeafFromRecord(record, key)).map(values -> {
+                // Un-flatten.
+                return createJsonDocument(new TreeMap<>(values), key, false);
+            });
+        });
+    }
+
+    static String computePath(List<Relationship> embeds) {
+        StringBuilder completePath = new StringBuilder("$");
+        for (Relationship embedRel : embeds) {
+            String pathElement = embedRel.get("path").asString();
+            if ("[]".equals(pathElement)) {
+                int index = embedRel.get("index").asNumber().intValue();
+                completePath.append("[").append(index).append("]");
+            } else {
+                completePath.append(".").append(pathElement);
+            }
+        }
+        return completePath.toString();
     }
 
     @Override
@@ -374,26 +450,22 @@ public class Neo4jPersistence implements RxJsonPersistence {
         cypher.append("MATCH (e :").append(entityName).append("_E {path: $path, hashOrValue: $value})<-[:EMBED*]-(m)<-[v:VERSION]-(r) ");
         cypher.append("WHERE v.from <= $snapshot AND $snapshot < v.to WITH r, v, m ORDER BY r.id LIMIT $limit\n");
         cypher.append("OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
-        StatementResult statementResult = neoTx.executeCypher(cypher.toString(), params);
-        return Flowable.fromIterable(assembleDocumentFromVersionAndEmbeddedNodes(namespace, entityName, statementResult));
+        return toDocuments(neoTx.executeCypherAsync(cypher.toString(), params), namespace, entityName);
     }
 
     @Override
     public Maybe<JsonDocument> readDocument(Transaction tx, ZonedDateTime snapshot, String ns, String entityName, String id) {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
+
         StringBuilder cypher = new StringBuilder();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("rid", id);
         params.put("snapshot", snapshot);
         cypher.append("MATCH (r :").append(entityName).append(" {id: $rid})-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to ");
         cypher.append("WITH r, v, m OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
-        StatementResult statementResult = neoTx.executeCypher(cypher.toString(), params);
-        List<JsonDocument> list = assembleDocumentFromVersionAndEmbeddedNodes(ns, entityName, statementResult);
-        if (list.size() > 1) {
-            return Maybe.error(new PersistenceException(String.format("More than one resource found: namespace=%s, entity=%s, id=%s, snapshot=%s", ns, entityName, id, snapshot.format(DateTimeFormatter.ISO_ZONED_DATE_TIME))));
-        } else {
-            return list.isEmpty() ? Maybe.empty() : Maybe.just(list.get(0));
-        }
+
+        Flowable<Record> records = neoTx.executeCypherAsync(cypher.toString(), params);
+        return toDocuments(records, ns, entityName).firstElement();
     }
 
     @Override
@@ -430,8 +502,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
         cypher.append("MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to").append(" ");
         cypher.append("WITH r, v, m ");
         cypher.append("OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
-        StatementResult statementResult = neoTx.executeCypher(cypher.toString(), params);
-        return Flowable.fromIterable(assembleDocumentFromVersionAndEmbeddedNodes(ns, entityName, statementResult));
+
+        Flowable<Record> records = neoTx.executeCypherAsync(cypher.toString(), params);
+        return toDocuments(records, ns, entityName);
     }
 
     @Override
@@ -452,7 +525,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         String toWhere = "WHERE firstVersion <= v.from";
         if (range.hasBefore()) {
             params.put("snapshotTo", range.getBefore());
-            toWhere = "WHERE firstVersion <= v.from AND v.from < $snapshotTo";
+            toWhere = "WHERE firstVersion <= v.from AND v.to < $snapshotTo";
         }
 
         String limit = "";
@@ -466,9 +539,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
         cypher.append("WITH r, v.from AS firstVersion\n");
         cypher.append("MATCH (r)-[v:VERSION]->(m) " + toWhere + "\n");
         cypher.append("WITH r, v, m " + orderBy + " " + limit + " OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
-        StatementResult statementResult = neoTx.executeCypher(cypher.toString(), params);
-        List<JsonDocument> result = assembleDocumentFromVersionAndEmbeddedNodes(ns, entityName, statementResult);
-        return Flowable.fromIterable(result);
+
+        Flowable<Record> records = neoTx.executeCypherAsync(cypher.toString(), params);
+        return toDocuments(records, ns, entityName);
     }
 
     @Override
@@ -484,11 +557,10 @@ public class Neo4jPersistence implements RxJsonPersistence {
             LinkedHashMap<String, Object> params = new LinkedHashMap<>();
             SpecificationElement entitySpecificationElement = specification.getRootElement().getProperties().get(document.key().entity());
             String cypher = traverseSpecificationAndGenerateCypherCreateStatement(entitySpecificationElement, params, document.key(), root);
-            tx.executeCypher(cypher, params);
+            return tx.executeCypherAsync(cypher, params).ignoreElements();
         } catch (IOException e) {
             return Completable.error(new PersistenceException(e));
         }
-        return Completable.complete();
     }
 
     @Override
@@ -496,8 +568,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         StringBuilder cypher = new StringBuilder();
         cypher.append("MATCH (r:").append(entityName).append(" {id: $rid})-[:VERSION {from:$version}]->(m) OPTIONAL MATCH (m)-[:EMBED*]->(e) DETACH DELETE m, e");
-        neoTx.executeCypher(cypher.toString(), "rid", id, "version", version);
-        return Completable.complete();
+        return neoTx.executeCypherAsync(cypher.toString(), Map.of("rid", id, "version", version)).ignoreElements();
     }
 
     @Override
@@ -505,8 +576,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         StringBuilder cypher = new StringBuilder();
         cypher.append("MATCH (r:").append(entity).append(" {id: $rid}) OPTIONAL MATCH (r)-[:VERSION]->(m) OPTIONAL MATCH (m)-[:EMBED*]->(e) DETACH DELETE r, m, e");
-        neoTx.executeCypher(cypher.toString(), "rid", id);
-        return Completable.complete();
+        return neoTx.executeCypherAsync(cypher.toString(), Map.of("rid", id)).ignoreElements();
     }
 
     @Override
@@ -520,18 +590,17 @@ public class Neo4jPersistence implements RxJsonPersistence {
         cypher.append("SET prevVersion.to = $version, m.deleted = true\n");
         cypher.append("WITH m OPTIONAL MATCH (m)-[:EMBED*]->(e) DETACH DELETE e");
 
-        tx.executeCypher(cypher.toString(), "rid", id, "version", version);
-        return Completable.complete();
+        return tx.executeCypherAsync(cypher.toString(), Map.of("rid", id, "version", version)).ignoreElements();
     }
 
     @Override
     public Single<Boolean> hasPrevious(Transaction tx, ZonedDateTime snapshot, String ns, String entityName, String id) {
-        return Single.error(new UnsupportedOperationException());
+        return readDocuments(tx, snapshot, ns, entityName, Range.lastBefore(1, id)).isEmpty().map(wasEmpty -> !wasEmpty);
     }
 
     @Override
     public Single<Boolean> hasNext(Transaction tx, ZonedDateTime snapshot, String ns, String entityName, String id) {
-        return Single.error(new UnsupportedOperationException());
+        return readDocuments(tx, snapshot, ns, entityName, Range.firstAfter(1, id)).isEmpty().map(wasEmpty -> !wasEmpty);
     }
 
     @Override
