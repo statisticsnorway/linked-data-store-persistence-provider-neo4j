@@ -22,11 +22,9 @@ import no.ssb.lds.api.specification.SpecificationElement;
 import no.ssb.lds.api.specification.SpecificationElementType;
 import org.json.JSONObject;
 import org.neo4j.driver.v1.Record;
-import org.neo4j.driver.v1.StatementResult;
 import org.neo4j.driver.v1.Value;
 import org.neo4j.driver.v1.types.Node;
 import org.neo4j.driver.v1.types.Relationship;
-import org.neo4j.driver.v1.util.Pair;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -71,7 +69,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         cypher.append(")");
         List<Object> data = new ArrayList<>();
         params.put("data", data);
-        convertJsonDocumentToMultiDimensionalCypherData(data, key, node, specificationElement);
+        convertJsonDocumentToMultiDimensionalCypherData(data, node, specificationElement);
         return cypher.toString();
     }
 
@@ -159,7 +157,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         return path;
     }
 
-    static void convertJsonDocumentToMultiDimensionalCypherData(List<Object> data, DocumentKey key, JsonNode node, SpecificationElement element) {
+    static void convertJsonDocumentToMultiDimensionalCypherData(List<Object> data, JsonNode node, SpecificationElement element) {
         if (node.isNull()) {
             data.add(Collections.emptyList());
         } else if (node.isContainerNode()) {
@@ -173,7 +171,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
                         JsonNode childNode = node.get(fieldName);
                         ArrayList<Object> childData = new ArrayList<>();
                         containerValue.add(childData);
-                        convertJsonDocumentToMultiDimensionalCypherData(childData, key, childNode, childElement);
+                        convertJsonDocumentToMultiDimensionalCypherData(childData, childNode, childElement);
                     } else {
                         containerValue.add(Collections.emptyList());
                     }
@@ -185,7 +183,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
                     List<Object> childData = new ArrayList<>();
                     containerValue.add(childData);
                     childData.add(i);
-                    convertJsonDocumentToMultiDimensionalCypherData(childData, key, childNode, childElement);
+                    convertJsonDocumentToMultiDimensionalCypherData(childData, childNode, childElement);
                 }
             }
         } else {
@@ -224,100 +222,6 @@ public class Neo4jPersistence implements RxJsonPersistence {
         return sb.toString();
     }
 
-    @Deprecated
-    private static List<JsonDocument> assembleDocumentFromVersionAndEmbeddedNodes(String namespace, String entity, StatementResult statementResult) {
-        List<JsonDocument> result = new ArrayList<>();
-        Map<String, FlattenedDocumentLeafNode> leafNodesByPath = new TreeMap<>();
-        DocumentKey documentKey = null;
-        long versionRelationshipId = Long.MIN_VALUE;
-        boolean deleted = false;
-        String id = null;
-        String pathWithIndices = null;
-        while (statementResult.hasNext()) {
-            Record record = statementResult.next();
-            for (Pair<String, Value> field : record.fields()) {
-                String key = field.key();
-                if ("r".equals(key)) {
-                    String rid = field.value().asNode().get("id").asString();
-                    if (id != null && !id.equals(rid)) {
-                        // resource changed
-                        JsonDocument document = createJsonDocument(leafNodesByPath, documentKey, deleted);
-                        result.add(document);
-                        leafNodesByPath.clear();
-                        deleted = false;
-                        pathWithIndices = null;
-                        documentKey = null;
-                    }
-                    id = rid;
-                } else if ("v".equals(key)) {
-                    Relationship versionRel = field.value().asRelationship();
-                    if (versionRelationshipId != versionRel.id()) {
-                        versionRelationshipId = versionRel.id();
-                        ZonedDateTime version = versionRel.get("from").asZonedDateTime();
-                        if (documentKey == null) {
-                            // first version
-                            documentKey = new DocumentKey(namespace, entity, id, version);
-                        } else {
-                            // new version
-                            JsonDocument document = createJsonDocument(leafNodesByPath, documentKey, deleted);
-                            result.add(document);
-                            leafNodesByPath.clear();
-                            deleted = false;
-                            pathWithIndices = null;
-                            documentKey = new DocumentKey(namespace, entity, id, version);
-                        }
-                    }
-                } else if ("l".equals(key)) {
-                    if (!field.value().isNull()) {
-                        List<Relationship> embeds = field.value().asList(v -> v.asRelationship());
-                        pathWithIndices = computePath(embeds);
-                    }
-                } else if ("m".equals(key)) {
-                    Value value = field.value();
-                    if ("m".equals(key)) {
-                        if (value.asNode().containsKey("deleted")) {
-                            Value deleteMarkerValue = value.get("deleted");
-                            deleted = deleteMarkerValue.asBoolean(false);
-                        }
-                    }
-                } else if ("e".equals(key)) {
-                    Value value = field.value();
-                    if (value.isNull()) {
-                        continue;
-                    }
-                    if (pathWithIndices == null) {
-                        throw new IllegalStateException("Unable to determine path with indices");
-                    }
-                    Value typeValue = value.asNode().get("type");
-                    String type = typeValue.asString();
-                    Value valueValue = value.asNode().get("value");
-                    if ("string".equals(type)) {
-                        String stringValue = valueValue.asString();
-                        leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.STRING, stringValue, Integer.MAX_VALUE));
-                    } else if ("numeric".equals(type)) {
-                        String stringValue = String.valueOf(valueValue.asNumber());
-                        leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.NUMERIC, stringValue, Integer.MAX_VALUE));
-                    } else if ("boolean".equals(type)) {
-                        String stringValue = String.valueOf(valueValue.asBoolean());
-                        leafNodesByPath.put(pathWithIndices, new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.BOOLEAN, stringValue, Integer.MAX_VALUE));
-                    } else if ("map".equals(type)) {
-                        // TODO identify empty-map and create leaf-node
-                    } else if ("array".equals(type)) {
-                        // TODO identify empty-array and create leaf-node
-                    } else {
-                        throw new IllegalStateException("type not supported: " + typeValue.asString());
-                    }
-                }
-            }
-        }
-        if (documentKey == null) {
-            return result;
-        }
-        JsonDocument document = createJsonDocument(leafNodesByPath, documentKey, deleted);
-        result.add(document);
-        return result;
-    }
-
     private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath,
                                                    DocumentKey documentKey, boolean deleted) {
         FlattenedDocument flattenedDocument = new FlattenedDocument(documentKey, leafNodesByPath, deleted);
@@ -339,6 +243,12 @@ public class Neo4jPersistence implements RxJsonPersistence {
         }
     }
 
+    /**
+     * Convert the {@link Record} to {@link FlattenedDocumentLeafNode}.
+     *
+     * Documents marked as deleted will be returned as empty.
+     * TODO: I think this is different in other implementations.
+     */
     static FlattenedDocumentLeafNode getLeafFromRecord(Record record, DocumentKey documentKey) {
 
         Node rootNode = record.get("m").asNode();
@@ -374,26 +284,34 @@ public class Neo4jPersistence implements RxJsonPersistence {
         }
     }
 
-    static DocumentKey getKeyFromRecord(Record record, String nameSpace, String entityName) {
+    /**
+     * Create a {@link DocumentKey} from a record.
+     */
+    static DocumentKey getKeyFromRecord(Record record, String namespace, String entityName) {
         String docId = record.get("r").get("id").asString();
         ZonedDateTime version = record.get("v").get("from").asZonedDateTime();
-        return new DocumentKey(nameSpace, entityName, docId, version);
+        return new DocumentKey(namespace, entityName, docId, version);
     }
 
+    /**
+     * Convert {@link Record}s stream {@link JsonDocument} stream.
+     */
     static Flowable<JsonDocument> toDocuments(Flowable<Record> records, String nameSpace, String entityName) {
         return records.groupBy(record -> {
-            // Group by
+            // Group by id and version.
             return getKeyFromRecord(record, nameSpace, entityName);
-        }).concatMapSingle(recordById -> {
+        }).concatMapEager(recordById -> {
             // For each group create a
             DocumentKey key = recordById.getKey();
             return recordById.toMap(record -> {
                 // Compute path.
                 return getPathFromRecord(record);
             }, record -> getLeafFromRecord(record, key)).map(values -> {
-                // Un-flatten.
+                // Un-flatten. Note that we always mark the node as not deleted since the
+                // neo4j data model does not contain any deleted nodes. Not sure if that
+                // TODO: Check that this does not break the contract.
                 return createJsonDocument(new TreeMap<>(values), key, false);
-            });
+            }).toFlowable();
         });
     }
 
@@ -471,7 +389,6 @@ public class Neo4jPersistence implements RxJsonPersistence {
     @Override
     public Flowable<JsonDocument> readDocuments(Transaction tx, ZonedDateTime snapshot, String ns, String entityName, Range<String> range) {
 
-        // TODO: Refactor.
         Map<String, Object> params = new LinkedHashMap<>();
 
         List<String> conditions = new ArrayList<>();
@@ -486,11 +403,12 @@ public class Neo4jPersistence implements RxJsonPersistence {
             params.put("idBefore", range.getBefore());
         }
 
+        // Swap the order so that we only use limit.
         String orderBy = " ORDER BY r.id " + (range.isBackward() ? "DESC " : "");
         String limit = "";
-        if (range.hasFirst() || range.hasLast()) {
+        if (range.isLimited()) {
             limit = " LIMIT $limit ";
-            params.put("limit", range.getFirst() != null ? range.getFirst() : range.getLast());
+            params.put("limit", range.getLimit());
         }
 
         params.put("snapshot", snapshot);
@@ -498,9 +416,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         StringBuilder cypher = new StringBuilder();
 
-        cypher.append("MATCH (r :").append(entityName).append(") WHERE ").append(String.join(" AND ", conditions)).append(" WITH r ").append(orderBy).append(limit).append("\n");
+        cypher.append("MATCH (r :").append(entityName).append(") WHERE ").append(String.join(" AND ", conditions)).append(" WITH r ").append(orderBy).append("\n");
         cypher.append("MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to").append(" ");
-        cypher.append("WITH r, v, m ");
+        cypher.append("WITH r, v, m ").append(limit);
         cypher.append("OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
 
         Flowable<Record> records = neoTx.executeCypherAsync(cypher.toString(), params);
@@ -514,31 +432,36 @@ public class Neo4jPersistence implements RxJsonPersistence {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("rid", id);
 
-        String fromWhere = "";
+        // Construct where clauses based on the range.
+        // First find the first one between ]after:before[
+        // Then filter the results such as ]after:from:before[
+
+
+        List<String> conditions = new ArrayList<>();
         if (range.hasAfter()) {
             params.put("snapshotFrom", range.getAfter());
-            fromWhere = "WHERE v.from < $snapshotFrom AND $snapshotFrom < v.to";
-            if (range.hasBefore()) {
-                fromWhere += " AND v.to < $snapshotTo";
-            }
+            conditions.add("$snapshotFrom < v.from");
         }
-        String toWhere = "WHERE firstVersion <= v.from";
+
         if (range.hasBefore()) {
             params.put("snapshotTo", range.getBefore());
-            toWhere = "WHERE firstVersion <= v.from AND v.to < $snapshotTo";
+            conditions.add("v.from < $snapshotTo");
         }
 
+        String where = conditions.isEmpty() ? " " : " WHERE " + String.join(" AND ", conditions);
+
+        // Swap the order so that we only use limit.
+        String orderBy = range.isBackward() ? " ORDER BY r.id, v.from DESC" : " ORDER BY r.id, v.from";
         String limit = "";
-        if (range.hasFirst() || range.hasFirst()) {
-            limit = "LIMIT $limit";
+        if (range.isLimited()) {
+            limit = " LIMIT $limit";
+            // Obs, since we are getting the r node, we need to bump limit by one.
+            params.put("limit", range.getLimit());
         }
 
-        String orderBy = range.isBackward() ? "ORDER BY v.from DESC" : "ORDER BY v.from";
-
-        cypher.append("MATCH (r :").append(entityName).append(" {id: $rid})-[v:VERSION]->(m) " + fromWhere + "\n");
-        cypher.append("WITH r, v.from AS firstVersion\n");
-        cypher.append("MATCH (r)-[v:VERSION]->(m) " + toWhere + "\n");
-        cypher.append("WITH r, v, m " + orderBy + " " + limit + " OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
+        cypher.append("MATCH (r :").append(entityName).append(" {id: $rid})-[v:VERSION]->(m) \n");
+        cypher.append("WITH r, v, m ").append(orderBy).append(where).append("\n");
+        cypher.append("WITH r, v, m ").append(limit).append(" OPTIONAL MATCH (m)-[l:EMBED*]->(e) RETURN r, v, m, l, e");
 
         Flowable<Record> records = neoTx.executeCypherAsync(cypher.toString(), params);
         return toDocuments(records, ns, entityName);
