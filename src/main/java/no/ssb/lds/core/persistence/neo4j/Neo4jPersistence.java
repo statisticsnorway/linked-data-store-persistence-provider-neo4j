@@ -83,7 +83,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         if (parentIsArray) {
             relationPath = "[]";
         }
-        cypher.append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:EMBED {path: '").append(relationPath).append("'");
+        cypher.append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:").append(element.getParent().getRefTypes().isEmpty() ? "EMBED" : "REF").append("{path: '").append(relationPath).append("'");
         if (parentIsArray) {
             cypher.append(", index: ").append(dataListIdentifier).append("[0]");
         }
@@ -245,7 +245,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     /**
      * Convert the {@link Record} to {@link FlattenedDocumentLeafNode}.
-     *
+     * <p>
      * Documents marked as deleted will be returned as empty.
      * TODO: I think this is different in other implementations.
      */
@@ -468,8 +468,55 @@ public class Neo4jPersistence implements RxJsonPersistence {
     }
 
     @Override
-    public Flowable<JsonDocument> readLinkedDocuments(Transaction tx, ZonedDateTime snapshot, String ns, String entityName, String id, String relationName, Range<String> range) {
-        return Flowable.error(new UnsupportedOperationException());
+    public Flowable<JsonDocument> readLinkedDocuments(Transaction tx, ZonedDateTime snapshot, String ns,
+                                                      String entityName, String id, String relationPath,
+                                                      String targetEntityName, Range<String> range) {
+        Neo4jTransaction neoTx = (Neo4jTransaction) tx;
+        try {
+            Map<String, Object> parameters = new LinkedHashMap<>();
+
+            parameters.put("snapshot", snapshot);
+            parameters.put("path", relationPath);
+            parameters.put("id", id);
+
+            String orderBy = "ORDER BY ref.value" + (range.isBackward() ? " DESC" : "");
+
+            String limit = "";
+            if (range.isLimited()) {
+                limit = "LIMIT $limit";
+                parameters.put("limit", range.getLimit());
+            }
+
+            String afterCondition = "";
+            if (range.hasAfter()) {
+                afterCondition = "AND $after < ref.value";
+                parameters.put("after", "/" + targetEntityName + "/" + range.getAfter());
+            }
+            String beforeCondition = "";
+            if (range.hasBefore()) {
+                beforeCondition = "AND ref.value < $before";
+                parameters.put("before", "/" + targetEntityName + "/" + range.getBefore());
+            }
+            String query = (
+                    "MATCH   (elem:%{entityName} {id: $id})-[version:VERSION]->\n" +
+                            "(root:%{entityName}_E)-[:EMBED*]->\n" +
+                            "(edge:%{entityName}_E {path:$path})-[:REF]->\n" +
+                            "(ref)\n" +
+                            "WHERE  version.from <= $snapshot AND $snapshot < version.to \n" +
+                            afterCondition + "\n" +
+                            beforeCondition + "\n" +
+                            "RETURN ref.value \n" +
+                            orderBy +"\n" +
+                            limit
+
+            ).replace("%{entityName}", entityName);
+
+            return neoTx.executeCypherAsync(query, parameters).map(record -> record.get(0).asString())
+                    .map(relValue -> relValue.split("/")[2])
+                    .concatMapMaybe(targetId -> readDocument(tx, snapshot, ns, targetEntityName, targetId));
+        } catch (Exception ex) {
+            return Flowable.error(ex);
+        }
     }
 
     @Override
