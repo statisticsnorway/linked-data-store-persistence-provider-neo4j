@@ -9,6 +9,8 @@ module no.ssb.lds.persistence.neo4j {
     requires org.neo4j.driver;
     requires java.logging;
     requires jul_to_slf4j;
+    requires io.reactivex.rxjava2;
+    requires org.reactivestreams;
 
     provides PersistenceInitializer with Neo4jInitializer;
 }

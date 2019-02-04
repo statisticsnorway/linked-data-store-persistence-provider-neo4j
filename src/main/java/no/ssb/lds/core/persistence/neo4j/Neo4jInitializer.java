@@ -2,7 +2,7 @@ package no.ssb.lds.core.persistence.neo4j;
 
 import no.ssb.lds.api.persistence.PersistenceInitializer;
 import no.ssb.lds.api.persistence.ProviderName;
-import no.ssb.lds.api.persistence.json.JsonPersistence;
+import no.ssb.lds.api.persistence.reactivex.RxJsonPersistence;
 import org.neo4j.driver.v1.AuthTokens;
 import org.neo4j.driver.v1.Driver;
 import org.neo4j.driver.v1.GraphDatabase;
@@ -39,7 +39,7 @@ public class Neo4jInitializer implements PersistenceInitializer {
     }
 
     @Override
-    public JsonPersistence initialize(String defaultNamespace, Map<String, String> configuration, Set<String> managedDomains) {
+    public RxJsonPersistence initialize(String defaultNamespace, Map<String, String> configuration, Set<String> managedDomains) {
         JavaUtilLoggingInitializer.initialize();
         String neo4jDriverURL = configuration.get("neo4j.driver.url");
         String neo4jDriverUsername = configuration.get("neo4j.driver.username");
