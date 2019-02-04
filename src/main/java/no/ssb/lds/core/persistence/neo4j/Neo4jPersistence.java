@@ -19,7 +19,6 @@ import no.ssb.lds.api.persistence.reactivex.RxJsonPersistence;
 import no.ssb.lds.api.persistence.streaming.FragmentType;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElement;
-import no.ssb.lds.api.specification.SpecificationElementType;
 import org.json.JSONObject;
 import org.neo4j.driver.v1.Record;
 import org.neo4j.driver.v1.Value;
@@ -33,9 +32,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -74,7 +71,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
     }
 
     private static void traverseSpecification(StringBuilder cypher, String entity, SpecificationElement element, int depth, String indentation, String parentNodeIdentifier, String nodeIdentifier, String dataListIdentifier) {
-        String path = pathOf(element);
+        String path = element.jsonPath();
         cypher.append(indentation).append("FOREACH(d").append(depth).append(" IN ").append(dataListIdentifier).append(" |\n");
         indentation += "  ";
         dataListIdentifier = "d" + depth;
@@ -139,22 +136,6 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     private static boolean isArrayElementNode(String nodeIdentifier) {
         return nodeIdentifier.endsWith("i");
-    }
-
-    static String pathOf(SpecificationElement element) {
-        Deque<String> parts = new LinkedList<>();
-        SpecificationElement e = element;
-        while (!SpecificationElementType.MANAGED.equals(e.getSpecificationElementType())) {
-            if (e.getParent().getJsonTypes().contains("array")) {
-                parts.addFirst("[]");
-            } else {
-                parts.addFirst(e.getName());
-            }
-            e = e.getParent();
-        }
-        parts.addFirst("$");
-        String path = parts.stream().collect(Collectors.joining(".")).replaceAll("\\.\\[]", "[]");
-        return path;
     }
 
     static void convertJsonDocumentToMultiDimensionalCypherData(List<Object> data, JsonNode node, SpecificationElement element) {
@@ -506,7 +487,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
                             afterCondition + "\n" +
                             beforeCondition + "\n" +
                             "RETURN ref.value \n" +
-                            orderBy +"\n" +
+                            orderBy + "\n" +
                             limit
 
             ).replace("%{entityName}", entityName);
@@ -547,6 +528,14 @@ public class Neo4jPersistence implements RxJsonPersistence {
         StringBuilder cypher = new StringBuilder();
         cypher.append("MATCH (r:").append(entity).append(" {id: $rid}) OPTIONAL MATCH (r)-[:VERSION]->(m) OPTIONAL MATCH (m)-[:EMBED*]->(e) DETACH DELETE r, m, e");
         return neoTx.executeCypherAsync(cypher.toString(), Map.of("rid", id)).ignoreElements();
+    }
+
+    @Override
+    public Completable deleteAllEntities(Transaction tx, String namespace, String entity, Specification specification) {
+        Neo4jTransaction neoTx = (Neo4jTransaction) tx;
+        StringBuilder cypher = new StringBuilder();
+        cypher.append("MATCH (r:").append(entity).append(") OPTIONAL MATCH (r)-[:VERSION]->(m) OPTIONAL MATCH (m)-[:EMBED*]->(e) DETACH DELETE r, m, e");
+        return neoTx.executeCypherAsync(cypher.toString(), Collections.emptyMap()).ignoreElements();
     }
 
     @Override
