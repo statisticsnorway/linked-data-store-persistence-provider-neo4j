@@ -14,13 +14,14 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
 import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.arrayNode;
+import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.arrayRefNode;
 import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.createSpecificationAndRoot;
 import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.objectNode;
+import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.refNode;
 import static no.ssb.lds.core.persistence.neo4j.SpecificationBuilder.stringNode;
 
 /*
@@ -91,6 +92,54 @@ public class Neo4jPersistenceTest {
         Specification specification = createSpecificationAndRoot(Set.of(
                 objectNode(SpecificationElementType.MANAGED, "SimpleArray", Set.of(
                         arrayNode("the", stringNode("[]"))
+                ))
+        ));
+        createAndPresentCypher(specification, node, "1");
+    }
+
+    @Test
+    public void simpleRef() throws IOException {
+        JsonNode node = loadJson("simple-ref.json");
+        Specification specification = createSpecificationAndRoot(Set.of(
+                objectNode(SpecificationElementType.MANAGED, "SimpleRef", Set.of(
+                        refNode("foo", Set.of("Target"))
+                ))
+        ));
+        createAndPresentCypher(specification, node, "1");
+    }
+
+    @Test
+    public void nestedSimpleRef() throws IOException {
+        JsonNode node = loadJson("nested-simple-ref.json");
+        Specification specification = createSpecificationAndRoot(Set.of(
+                objectNode(SpecificationElementType.MANAGED, "NestedSimpleRef", Set.of(
+                        objectNode("here", Set.of(
+                                refNode("foo", Set.of("Target"))
+                        ))
+                ))
+        ));
+        createAndPresentCypher(specification, node, "1");
+    }
+
+    @Test
+    public void arrayRef() throws IOException {
+        JsonNode node = loadJson("array-ref.json");
+        Specification specification = createSpecificationAndRoot(Set.of(
+                objectNode(SpecificationElementType.MANAGED, "ArrayRef", Set.of(
+                        arrayRefNode("foo", Set.of("Target"), stringNode("[]"))
+                ))
+        ));
+        createAndPresentCypher(specification, node, "1");
+    }
+
+    @Test
+    public void nestedArrayRef() throws IOException {
+        JsonNode node = loadJson("nested-array-ref.json");
+        Specification specification = createSpecificationAndRoot(Set.of(
+                objectNode(SpecificationElementType.MANAGED, "ArrayRef", Set.of(
+                        objectNode("here", Set.of(
+                                arrayRefNode("foo", Set.of("Target"), stringNode("[]"))
+                        ))
                 ))
         ));
         createAndPresentCypher(specification, node, "1");
@@ -174,15 +223,13 @@ public class Neo4jPersistenceTest {
     }
 
     private void createAndPresentCypher(Specification specification, JsonNode node, String id) {
-        Map<String, Object> params = new LinkedHashMap<>();
         String theManagedDomain = specification.getManagedDomains().iterator().next();
-        String cypher = Neo4jPersistence.traverseSpecificationAndGenerateCypherCreateStatement(
-                specification.getRootElement().getProperties().get(theManagedDomain),
-                params,
+        Neo4jQueryAndParams qp = new Neo4jCreationalPatternFactory().creationalQueryAndParams(
+                specification,
                 new DocumentKey("neo4j-provider-test-ns", theManagedDomain, id, ZonedDateTime.now(ZoneId.of("Etc/UTC"))),
                 node
         );
-        presentCypherWithEmbeddedParameters(cypher, params);
+        presentCypherWithEmbeddedParameters(qp.query, qp.params);
     }
 
     private void presentCypherWithEmbeddedParameters(String cypher, Map<String, Object> params) {
@@ -194,7 +241,7 @@ public class Neo4jPersistenceTest {
 
     private String resolveAndEmbeddParameters(String cypher, Map<String, Object> params) {
         String replacedCypher = cypher;
-        replacedCypher = replacedCypher.replaceAll("\\$rid", "'" + (String) params.get("rid") + "'");
+        replacedCypher = replacedCypher.replaceAll("\\$rid", "'" + params.get("rid") + "'");
         replacedCypher = replacedCypher.replaceAll("\\$version", "'" + ((ZonedDateTime) params.get("version")).format(DateTimeFormatter.ISO_ZONED_DATE_TIME) + "'");
         replacedCypher = replacedCypher.replaceAll("\\$data", toString(params.get("data")));
         return replacedCypher;

@@ -30,6 +30,16 @@ public class SpecificationBuilder {
         return arrayNode;
     }
 
+    public static TestSpecificationElement refNode(String name, Set<String> refTypes) {
+        return new TestSpecificationElement(name, SpecificationElementType.REF, Set.of("string"), List.of(), refTypes, Map.of(), null);
+    }
+
+    public static TestSpecificationElement arrayRefNode(String name, Set<String> refTypes, TestSpecificationElement items) {
+        TestSpecificationElement arrayNode = new TestSpecificationElement(name, SpecificationElementType.REF, Set.of("array"), List.of(), refTypes, Map.of(), items);
+        items.parent(arrayNode);
+        return arrayNode;
+    }
+
     public static TestSpecificationElement objectNode(String name, Set<TestSpecificationElement> properties) {
         return objectNode(SpecificationElementType.EMBEDDED, name, properties);
     }
