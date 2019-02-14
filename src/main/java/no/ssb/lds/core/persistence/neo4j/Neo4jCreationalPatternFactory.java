@@ -1,6 +1,7 @@
 package no.ssb.lds.core.persistence.neo4j;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import no.ssb.lds.api.json.JsonNavigationPath;
 import no.ssb.lds.api.persistence.DocumentKey;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElement;
@@ -68,7 +69,7 @@ class Neo4jCreationalPatternFactory {
     }
 
     static void traverseSpecification(StringBuilder cypher, String entity, SpecificationElement element, int depth, String indentation, String parentNodeIdentifier, String nodeIdentifier, String dataListIdentifier) {
-        String path = element.jsonPath();
+        String path = JsonNavigationPath.from(element).serialize();
         cypher.append("\n").append(indentation).append("FOREACH(d").append(depth).append(" IN ").append(dataListIdentifier).append(" |");
         indentation += "  ";
         dataListIdentifier = "d" + depth;

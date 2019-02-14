@@ -6,6 +6,7 @@ import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Maybe;
 import io.reactivex.Single;
+import no.ssb.lds.api.json.JsonNavigationPath;
 import no.ssb.lds.api.persistence.DocumentKey;
 import no.ssb.lds.api.persistence.PersistenceDeletePolicy;
 import no.ssb.lds.api.persistence.PersistenceException;
@@ -314,45 +315,46 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     @Override
     public Flowable<JsonDocument> readLinkedDocuments(Transaction tx, ZonedDateTime snapshot, String ns,
-                                                      String entityName, String id, String relationPath,
+                                                      String entityName, String id, JsonNavigationPath jsonNavigationPath,
                                                       String targetEntityName, Range<String> range) {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         try {
             Map<String, Object> parameters = new LinkedHashMap<>();
 
             parameters.put("snapshot", snapshot);
-            parameters.put("path", relationPath);
+            parameters.put("path", jsonNavigationPath.popBack().serialize());
+            parameters.put("lastPathElement", jsonNavigationPath.back());
             parameters.put("id", id);
 
-            String orderBy = "ORDER BY r.id" + (range.isBackward() ? " DESC" : "");
+            String orderBy = "ORDER BY r.id" + (range.isBackward() ? " DESC\n" : "\n");
 
             String limit = "";
             if (range.isLimited()) {
-                limit = "LIMIT $limit";
+                limit = "LIMIT $limit\n";
                 parameters.put("limit", range.getLimit());
             }
 
             String afterCondition = "";
             if (range.hasAfter()) {
-                afterCondition = "AND $after < r.id";
+                afterCondition = "AND $after < r.id\n";
                 parameters.put("after", range.getAfter());
             }
             String beforeCondition = "";
             if (range.hasBefore()) {
-                beforeCondition = "AND r.id < $before";
+                beforeCondition = "AND r.id < $before\n";
                 parameters.put("before", range.getBefore());
             }
             String query = (
                     "MATCH   (elem:%{entityName} {id: $id})-[version:VERSION]->\n" +
                             "(root:%{entityName}_E)-[:EMBED*]->\n" +
-                            "(edge:%{entityName}_E {path:$path})-[:REF]->\n" +
+                            "(edge:%{entityName}_E {path:$path})-[:REF {path: $lastPathElement}]->\n" +
                             "(r:" + targetEntityName + ")\n" +
                             "WHERE  version.from <= $snapshot AND $snapshot < version.to \n" +
-                            afterCondition + "\n" +
-                            beforeCondition + "\n" +
+                            afterCondition +
+                            beforeCondition +
                             "WITH r\n" +
-                            orderBy + "\n" +
-                            limit + "\n" +
+                            orderBy +
+                            limit +
                             "MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to " +
                             "WITH r, v, m OPTIONAL MATCH p=(m)-[:EMBED|REF*]->(e) RETURN r, v, m, relationships(p) AS l, e"
             ).replace("%{entityName}", entityName);
@@ -368,7 +370,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         StringBuilder cypher = new StringBuilder();
         cypher.append("MATCH (r:").append(entityName).append(" {id: $rid})-[:VERSION {from:$version}]->(m) OPTIONAL MATCH (m)-[:EMBED*]->(e) DETACH DELETE m, e ");
-        cypher.append("WITH r MATCH (r) WHERE NOT (r)<--() DELETE r");
+        cypher.append("WITH r MATCH (r) WHERE NOT (r)--() DELETE r");
         return neoTx.executeCypherAsync(cypher.toString(), Map.of("rid", id, "version", version)).ignoreElements();
     }
 
