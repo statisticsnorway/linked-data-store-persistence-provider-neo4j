@@ -1,5 +1,6 @@
 package no.ssb.lds.core.persistence.neo4j;
 
+import no.ssb.lds.api.json.JsonNavigationPath;
 import no.ssb.lds.api.specification.SpecificationElement;
 import no.ssb.lds.api.specification.SpecificationElementType;
 import no.ssb.lds.api.specification.SpecificationValidator;
@@ -77,5 +78,14 @@ public class TestSpecificationElement implements SpecificationElement {
     @Override
     public SpecificationElement getItems() {
         return items;
+    }
+
+    @Override
+    public String toString() {
+        return "TestSpecificationElement{" +
+                "path='" + JsonNavigationPath.from(this).serialize() + '\'' +
+                ", Type=" + specificationElementType +
+                ", jsonTypes=" + jsonTypes +
+                '}';
     }
 }
