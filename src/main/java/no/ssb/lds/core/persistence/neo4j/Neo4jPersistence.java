@@ -102,7 +102,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
             if ("string".equals(type)) {
                 String stringValue = valueValue.asString();
                 return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.STRING, stringValue, Integer.MAX_VALUE);
-            } else if ("numeric".equals(type)) {
+            } else if ("number".equals(type)) {
                 String stringValue = String.valueOf(valueValue.asNumber());
                 return new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.NUMERIC, stringValue, Integer.MAX_VALUE);
             } else if ("boolean".equals(type)) {
