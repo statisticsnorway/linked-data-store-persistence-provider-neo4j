@@ -1,7 +1,6 @@
 package no.ssb.lds.core.persistence.neo4j;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Maybe;
@@ -19,13 +18,11 @@ import no.ssb.lds.api.persistence.reactivex.Range;
 import no.ssb.lds.api.persistence.reactivex.RxJsonPersistence;
 import no.ssb.lds.api.persistence.streaming.FragmentType;
 import no.ssb.lds.api.specification.Specification;
-import org.json.JSONObject;
 import org.neo4j.driver.v1.Record;
 import org.neo4j.driver.v1.Value;
 import org.neo4j.driver.v1.types.Node;
 import org.neo4j.driver.v1.types.Relationship;
 
-import java.io.IOException;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,7 +35,6 @@ import static no.ssb.lds.core.persistence.neo4j.Neo4jCreationalPatternFactory.ha
 
 public class Neo4jPersistence implements RxJsonPersistence {
 
-    private final ObjectMapper mapper = new ObjectMapper();
     private final Neo4jTransactionFactory transactionFactory;
     private final Neo4jCreationalPatternFactory creationalPatternFactory;
 
@@ -50,7 +46,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
     private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath,
                                                    DocumentKey documentKey, boolean deleted) {
         FlattenedDocument flattenedDocument = new FlattenedDocument(documentKey, leafNodesByPath, deleted);
-        JSONObject jsonObject = new FlattenedDocumentToJson(flattenedDocument).toJSONObject();
+        JsonNode jsonObject = new FlattenedDocumentToJson(flattenedDocument).toJsonNode();
         return new JsonDocument(documentKey, jsonObject);
     }
 
@@ -171,13 +167,8 @@ public class Neo4jPersistence implements RxJsonPersistence {
     @Override
     public Completable createOrOverwrite(Transaction transaction, JsonDocument document, Specification specification) {
         Neo4jTransaction tx = (Neo4jTransaction) transaction;
-        try {
-            JsonNode root = mapper.readTree(document.document().toString());
-            Neo4jQueryAndParams qp = creationalPatternFactory.creationalQueryAndParams(specification, document.key(), root);
-            return tx.executeCypherAsync(qp.query, qp.params).ignoreElements();
-        } catch (IOException e) {
-            return Completable.error(new PersistenceException(e));
-        }
+        Neo4jQueryAndParams qp = creationalPatternFactory.creationalQueryAndParams(specification, document.key(), document.jackson());
+        return tx.executeCypherAsync(qp.query, qp.params).ignoreElements();
     }
 
     @Override
