@@ -172,13 +172,13 @@ public class Neo4jPersistence implements RxJsonPersistence {
     }
 
     @Override
-    public Flowable<JsonDocument> findDocument(Transaction tx, ZonedDateTime snapshot, String namespace, String entityName, String path, String value, Range<String> range) {
+    public Flowable<JsonDocument> findDocument(Transaction tx, ZonedDateTime snapshot, String namespace, String entityName, JsonNavigationPath path, String value, Range<String> range) {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         StringBuilder cypher = new StringBuilder();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("snapshot", snapshot);
         params.put("limit", Integer.MAX_VALUE);
-        params.put("path", path);
+        params.put("path", path.serialize());
         // TODO refactor API.
         Object objectValue = value;
         if (objectValue instanceof String) {
