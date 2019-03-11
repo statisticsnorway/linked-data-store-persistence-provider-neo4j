@@ -165,10 +165,22 @@ public class Neo4jPersistence implements RxJsonPersistence {
     }
 
     @Override
-    public Completable createOrOverwrite(Transaction transaction, JsonDocument document, Specification specification) {
+    public Completable createOrOverwrite(Transaction transaction, Flowable<JsonDocument> documentFlowable, Specification specification) {
         Neo4jTransaction tx = (Neo4jTransaction) transaction;
-        Neo4jQueryAndParams qp = creationalPatternFactory.creationalQueryAndParams(specification, document.key(), document.jackson());
-        return tx.executeCypherAsync(qp.query, qp.params).ignoreElements();
+
+        Map<String, List<JsonDocument>> documentsByEntity = new LinkedHashMap<>();
+        List<JsonDocument> documents = documentFlowable.toList().blockingGet();
+        for (JsonDocument document : documents) {
+            documentsByEntity.computeIfAbsent(document.key().entity(), e -> new ArrayList<>()).add(document);
+        }
+        List<Completable> completables = new ArrayList<>();
+        for (Map.Entry<String, List<JsonDocument>> entry : documentsByEntity.entrySet()) {
+            String entity = entry.getKey();
+            List<JsonDocument> documentForEntityList = entry.getValue();
+            Neo4jQueryAndParams qp = creationalPatternFactory.creationalQueryAndParams(specification, entity, documentForEntityList);
+            completables.add(tx.executeCypherAsync(qp.query, qp.params).ignoreElements());
+        }
+        return Completable.merge(completables);
     }
 
     @Override

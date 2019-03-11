@@ -3,6 +3,7 @@ package no.ssb.lds.core.persistence.neo4j;
 import com.fasterxml.jackson.databind.JsonNode;
 import no.ssb.lds.api.json.JsonNavigationPath;
 import no.ssb.lds.api.persistence.DocumentKey;
+import no.ssb.lds.api.persistence.json.JsonDocument;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElement;
 import no.ssb.lds.api.specification.SpecificationElementType;
@@ -24,15 +25,23 @@ class Neo4jCreationalPatternFactory {
 
     private Map<SpecificationElement, String> creationalPatternByEntity = new ConcurrentHashMap<>();
 
-    Neo4jQueryAndParams creationalQueryAndParams(Specification specification, DocumentKey key, JsonNode documentRootNode) {
-        SpecificationElement entitySpecificationElement = specification.getRootElement().getProperties().get(key.entity());
+    Neo4jQueryAndParams creationalQueryAndParams(Specification specification, String entity, List<JsonDocument> documentForEntityList) {
+        SpecificationElement entitySpecificationElement = specification.getRootElement().getProperties().get(entity);
         String cypher = creationalCypherForEntity(entitySpecificationElement);
-        List<Object> data = new ArrayList<>();
-        convertJsonDocumentToMultiDimensionalCypherData(data, documentRootNode, entitySpecificationElement);
+        List<Object> batch = new ArrayList<>();
+        for (JsonDocument document : documentForEntityList) {
+            DocumentKey key = document.key();
+            JsonNode documentRootNode = document.jackson();
+            List<Object> data = new ArrayList<>();
+            convertJsonDocumentToMultiDimensionalCypherData(data, documentRootNode, entitySpecificationElement);
+            List<Object> record = new ArrayList<>();
+            record.add(key.id());
+            record.add(key.timestamp());
+            record.add(data);
+            batch.add(record);
+        }
         Map<String, Object> params = Map.of(
-                "rid", key.id(),
-                "version", key.timestamp(),
-                "data", data
+                "batch", batch
         );
         return new Neo4jQueryAndParams(cypher, params);
     }
@@ -41,20 +50,22 @@ class Neo4jCreationalPatternFactory {
         if (!SpecificationElementType.MANAGED.equals(specificationElement.getSpecificationElementType())) {
             throw new IllegalArgumentException("specificationElement must be of type MANAGED");
         }
-        return creationalPatternByEntity.computeIfAbsent(specificationElement, e -> buildCreationalCypherForEntity(e, e.getName()));
+        return creationalPatternByEntity.computeIfAbsent(specificationElement, e -> buildCreationalCypherForEntity(e));
     }
 
     static final Pattern linkPattern = Pattern.compile("/?([^/]*)/([^/]*)");
 
-    static String buildCreationalCypherForEntity(SpecificationElement specificationElement, String entity) {
+    static String buildCreationalCypherForEntity(SpecificationElement specificationElement) {
+        String entity = specificationElement.getName();
         StringBuilder cypher = new StringBuilder();
-        cypher.append("MERGE (r:").append(entity).append(" {id: $rid}) WITH r\n");
-        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION {from: $version}]->(m)-[:EMBED*]->(e) DETACH DELETE m, e WITH r\n");
-        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION]->() WHERE v.from <= $version AND $version < v.to WITH r, v AS prevVersion\n");
-        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION]->() WHERE v.from > $version WITH r, prevVersion, v AS nextVersion ORDER BY v.from LIMIT 1\n");
-        cypher.append("FOREACH(d IN $data |\n");
-        cypher.append("  MERGE (r)-[v:VERSION {from: $version, to: coalesce(prevVersion.to, nextVersion.from, datetime('9999-01-01T00:00:00.0Z[Etc/UTC]'))}]->(m:").append(entity).append("_E {type:'map', path:'$'})\n");
-        cypher.append("  SET prevVersion.to = $version");
+        cypher.append("UNWIND $batch AS record\n");
+        cypher.append("MERGE (r:").append(entity).append(" {id: record[0]}) WITH r, record[1] AS version, record[2] AS data\n");
+        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION {from: version}]->(m)-[:EMBED*]->(e) DETACH DELETE m, e WITH r, version, data\n");
+        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION]->() WHERE v.from <= version AND version < v.to WITH r, version, data, v AS prevVersion\n");
+        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION]->() WHERE v.from > version WITH r, version, data, prevVersion, min(v.from) AS nextVersionFrom\n");
+        cypher.append("FOREACH(d IN data |\n");
+        cypher.append("  MERGE (r)-[v:VERSION {from: version, to: coalesce(prevVersion.to, nextVersionFrom, datetime('9999-01-01T00:00:00.0Z[Etc/UTC]'))}]->(m:").append(entity).append("_E {type:'map', path:'$'})\n");
+        cypher.append("  SET prevVersion.to = version");
         int i = 0;
         for (Map.Entry<String, SpecificationElement> entry : specificationElement.getProperties().entrySet()) {
             traverseSpecification(cypher, entity, entry.getValue(), 1, "    ", "m", "m" + i, "d[" + i + "]");

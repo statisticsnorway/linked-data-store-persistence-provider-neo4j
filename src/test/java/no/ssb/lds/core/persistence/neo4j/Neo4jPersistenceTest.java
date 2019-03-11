@@ -3,6 +3,7 @@ package no.ssb.lds.core.persistence.neo4j;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import no.ssb.lds.api.persistence.DocumentKey;
+import no.ssb.lds.api.persistence.json.JsonDocument;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElementType;
 import org.testng.annotations.Test;
@@ -11,9 +12,9 @@ import java.io.IOException;
 import java.net.URL;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -226,8 +227,8 @@ public class Neo4jPersistenceTest {
         String theManagedDomain = specification.getManagedDomains().iterator().next();
         Neo4jQueryAndParams qp = new Neo4jCreationalPatternFactory().creationalQueryAndParams(
                 specification,
-                new DocumentKey("neo4j-provider-test-ns", theManagedDomain, id, ZonedDateTime.now(ZoneId.of("Etc/UTC"))),
-                node
+                theManagedDomain,
+                List.of(new JsonDocument(new DocumentKey("neo4j-provider-test-ns", theManagedDomain, id, ZonedDateTime.now(ZoneId.of("Etc/UTC"))), node))
         );
         presentCypherWithEmbeddedParameters(qp.query, qp.params);
     }
@@ -241,9 +242,7 @@ public class Neo4jPersistenceTest {
 
     private String resolveAndEmbeddParameters(String cypher, Map<String, Object> params) {
         String replacedCypher = cypher;
-        replacedCypher = replacedCypher.replaceAll("\\$rid", "'" + params.get("rid") + "'");
-        replacedCypher = replacedCypher.replaceAll("\\$version", "'" + ((ZonedDateTime) params.get("version")).format(DateTimeFormatter.ISO_ZONED_DATE_TIME) + "'");
-        replacedCypher = replacedCypher.replaceAll("\\$data", toString(params.get("data")));
+        replacedCypher = replacedCypher.replaceAll("\\$batch", toString(params.get("batch")));
         return replacedCypher;
     }
 
