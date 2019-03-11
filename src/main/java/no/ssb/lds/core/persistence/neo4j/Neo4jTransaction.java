@@ -2,7 +2,6 @@ package no.ssb.lds.core.persistence.neo4j;
 
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
-import io.reactivex.Single;
 import no.ssb.lds.api.persistence.Transaction;
 import no.ssb.lds.api.persistence.TransactionStatistics;
 import org.neo4j.driver.v1.Record;
@@ -11,7 +10,9 @@ import org.neo4j.driver.v1.StatementResult;
 import org.neo4j.driver.v1.StatementResultCursor;
 import org.neo4j.driver.v1.summary.ResultSummary;
 
+import java.time.temporal.Temporal;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -68,7 +69,7 @@ class Neo4jTransaction implements Transaction {
     Flowable<Record> executeCypherAsync(String query, Map<String, Object> parameters) {
         if (logCypher) {
             System.out.format("\n:: CYPHER (ASYNC) ::\n%s\n", query);
-            System.out.format(":: DATA ::\n%s\n", parameters);
+            System.out.format(":: DATA ::\n%s\n", serializeForInteractive(parameters));
         }
         return Flowable.create(emitter -> {
             CompletionStage<StatementResultCursor> cursor = neo4jTransaction.runAsync(query, parameters);
@@ -93,10 +94,61 @@ class Neo4jTransaction implements Transaction {
         }, BackpressureStrategy.BUFFER);
     }
 
+    private String serializeForInteractive(Map<String, Object> parameters) {
+        StringBuilder sb = new StringBuilder();
+        doSerializeRecursively(sb, parameters);
+        return sb.toString();
+    }
+
+    private void doSerializeRecursively(StringBuilder sb, Object input) {
+        if (input == null) {
+            sb.append("NULL");
+            return;
+        }
+        if (input instanceof Map) {
+            sb.append("{");
+            boolean first = true;
+            for (Map.Entry<String, Object> entry : ((Map<String, Object>) input).entrySet()) {
+                if (!first) {
+                    sb.append(", ");
+                }
+                first = false;
+                sb.append(entry.getKey()).append(": ");
+                doSerializeRecursively(sb, entry.getValue());
+            }
+            sb.append("}");
+            return;
+        }
+        if (input instanceof List) {
+            sb.append("[");
+            boolean first = true;
+            for (Object o : (List<Object>) input) {
+                if (!first) {
+                    sb.append(", ");
+                }
+                first = false;
+                doSerializeRecursively(sb, o);
+            }
+            sb.append("]");
+            return;
+        }
+        if (input instanceof CharSequence) {
+            sb.append("'").append(input).append("'");
+            return;
+        }
+        if (input instanceof Number) {
+            sb.append(input);
+            return;
+        }
+        if (input instanceof Temporal) {
+            sb.append("datetime('").append(input).append("')");
+        }
+    }
+
     StatementResult executeCypher(String query, Map<String, Object> params) {
         if (logCypher) {
             System.out.format("\n:: CYPHER ::\n%s\n", query);
-            System.out.format(":: DATA ::\n%s\n", params);
+            System.out.format(":: DATA ::\n%s\n", serializeForInteractive(params));
         }
         StatementResult statementResult = neo4jTransaction.run(query, params);
         return statementResult;
