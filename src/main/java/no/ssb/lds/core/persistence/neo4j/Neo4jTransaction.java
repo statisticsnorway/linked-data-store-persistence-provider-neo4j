@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.regex.Matcher;
 
 class Neo4jTransaction implements Transaction {
 
@@ -68,8 +69,13 @@ class Neo4jTransaction implements Transaction {
 
     Flowable<Record> executeCypherAsync(String query, Map<String, Object> parameters) {
         if (logCypher) {
-            System.out.format("\n:: CYPHER (ASYNC) ::\n%s\n", query);
-            System.out.format(":: DATA ::\n%s\n", serializeForInteractive(parameters));
+            String interactiveQuery = query;
+            for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+                String regex = "\\$" + entry.getKey();
+                String replacement = serializeForInteractive(entry.getValue());
+                interactiveQuery = interactiveQuery.replaceAll(regex, Matcher.quoteReplacement(replacement));
+            }
+            System.out.format("\n:: CYPHER (ASYNC) ::\n%s\n", interactiveQuery);
         }
         return Flowable.create(emitter -> {
             CompletionStage<StatementResultCursor> cursor = neo4jTransaction.runAsync(query, parameters);
@@ -94,7 +100,7 @@ class Neo4jTransaction implements Transaction {
         }, BackpressureStrategy.BUFFER);
     }
 
-    private String serializeForInteractive(Map<String, Object> parameters) {
+    private String serializeForInteractive(Object parameters) {
         StringBuilder sb = new StringBuilder();
         doSerializeRecursively(sb, parameters);
         return sb.toString();
@@ -147,8 +153,11 @@ class Neo4jTransaction implements Transaction {
 
     StatementResult executeCypher(String query, Map<String, Object> params) {
         if (logCypher) {
-            System.out.format("\n:: CYPHER ::\n%s\n", query);
-            System.out.format(":: DATA ::\n%s\n", serializeForInteractive(params));
+            String interactiveQuery = query;
+            for (Map.Entry<String, Object> entry : params.entrySet()) {
+                interactiveQuery = interactiveQuery.replaceAll("\\$" + entry.getKey(), Matcher.quoteReplacement(serializeForInteractive(entry.getValue())));
+            }
+            System.out.format("\n:: CYPHER ::\n%s\n", interactiveQuery);
         }
         StatementResult statementResult = neo4jTransaction.run(query, params);
         return statementResult;
