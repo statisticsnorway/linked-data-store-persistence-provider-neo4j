@@ -368,6 +368,57 @@ public class Neo4jPersistence implements RxJsonPersistence {
         }
     }
 
+    public Flowable<JsonDocument> readReverseLinkedDocuments(Transaction tx, ZonedDateTime snapshot, String ns,
+                                                      String targetEntityName, String targetId, JsonNavigationPath relationPath,
+                                                      String sourceEntityName, Range<String> range) {
+        Neo4jTransaction neoTx = (Neo4jTransaction) tx;
+        try {
+            Map<String, Object> parameters = new LinkedHashMap<>();
+
+            parameters.put("snapshot", snapshot);
+            parameters.put("path", relationPath.popBack().serialize());
+            parameters.put("lastPathElement", relationPath.back());
+            parameters.put("id", targetId);
+
+            String orderBy = "ORDER BY r.id" + (range.isBackward() ? " DESC\n" : "\n");
+
+            String limit = "";
+            if (range.isLimited()) {
+                limit = "LIMIT $limit\n";
+                parameters.put("limit", range.getLimit());
+            }
+
+            String afterCondition = "";
+            if (range.hasAfter()) {
+                afterCondition = "AND $after < r.id\n";
+                parameters.put("after", range.getAfter());
+            }
+            String beforeCondition = "";
+            if (range.hasBefore()) {
+                beforeCondition = "AND r.id < $before\n";
+                parameters.put("before", range.getBefore());
+            }
+            String query = (
+                    "MATCH   (elem:" + targetEntityName + " {id: $id})<-[:REF {path: $lastPathElement}]-" +
+                            "(edge:%{entityName}_E {path:$path})<-[:EMBED*]-" +
+                            "(root:%{entityName}_E)<-[version:VERSION]-" +
+                            "(r:%{entityName}) \n" +
+                            "WHERE  version.from <= $snapshot AND $snapshot < version.to \n" +
+                            afterCondition +
+                            beforeCondition +
+                            "WITH r\n" +
+                            orderBy +
+                            limit +
+                            "MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to " +
+                            "WITH r, v, m OPTIONAL MATCH p=(m)-[:EMBED|REF*]->(e) RETURN r, v, m, relationships(p) AS l, e"
+            ).replace("%{entityName}", sourceEntityName);
+
+            return toDocuments(neoTx.executeCypherAsync(query, parameters), ns, sourceEntityName);
+        } catch (Exception ex) {
+            return Flowable.error(ex);
+        }
+    }
+
     @Override
     public Completable deleteDocument(Transaction tx, String ns, String entityName, String id, ZonedDateTime version, PersistenceDeletePolicy policy) {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
