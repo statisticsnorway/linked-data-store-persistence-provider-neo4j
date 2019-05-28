@@ -370,8 +370,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     @Override
     public Flowable<JsonDocument> readSourceDocuments(Transaction tx, ZonedDateTime snapshot, String ns,
-                                                      String targetEntityName, String targetId, JsonNavigationPath relationPath,
-                                                      String sourceEntityName, Range<String> range) {
+                                                      String targetEntityName, String targetId,
+                                                      JsonNavigationPath relationPath, String sourceEntityName,
+                                                      Range<String> range) {
         Neo4jTransaction neoTx = (Neo4jTransaction) tx;
         try {
             Map<String, Object> parameters = new LinkedHashMap<>();
@@ -391,28 +392,27 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
             String afterCondition = "";
             if (range.hasAfter()) {
-                afterCondition = "AND $after < r.id\n";
+                afterCondition = "AND $after < source.id\n";
                 parameters.put("after", range.getAfter());
             }
             String beforeCondition = "";
             if (range.hasBefore()) {
-                beforeCondition = "AND r.id < $before\n";
+                beforeCondition = "AND source.id < $before\n";
                 parameters.put("before", range.getBefore());
             }
             String query = (
-                    "MATCH   (elem:" + targetEntityName + " {id: $id})<-[:REF {path: $lastPathElement}]-" +
-                            "(edge:%{entityName}_E {path:$path})<-[:EMBED*]-" +
-                            "(root:%{entityName}_E)<-[version:VERSION]-" +
-                            "(r:%{entityName}) \n" +
+                    "MATCH (edge:%{sourceEntityName}_E {path:$path})-[REF {path: $lastPathElement}]->(target:%{targetEntityName} {id: $id}),\n" +
+                            "      (root:%{sourceEntityName}_E)-[*0..]->(edge:%{sourceEntityName}_E),\n" +
+                            "      (source:%{sourceEntityName})-[version:VERSION]->(root)\n" +
                             "WHERE  version.from <= $snapshot AND $snapshot < version.to \n" +
                             afterCondition +
                             beforeCondition +
-                            "WITH r\n" +
+                            "WITH source as r\n" +
                             orderBy +
                             limit +
-                            "MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to " +
-                            "WITH r, v, m OPTIONAL MATCH p=(m)-[:EMBED|REF*]->(e) RETURN r, v, m, relationships(p) AS l, e"
-            ).replace("%{entityName}", sourceEntityName);
+                            "MATCH (r)-[v:VERSION]->(m) WHERE v.from <= $snapshot AND $snapshot < v.to \n" +
+                            "WITH r, v, m OPTIONAL MATCH p=(m)-[:EMBED|REF*]->(e) RETURN r, v, m, relationships(p) AS l, e\n"
+            ).replace("%{sourceEntityName}", sourceEntityName).replace("%{targetEntityName}", targetEntityName);
 
             return toDocuments(neoTx.executeCypherAsync(query, parameters), ns, sourceEntityName);
         } catch (Exception ex) {

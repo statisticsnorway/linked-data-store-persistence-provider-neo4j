@@ -20,7 +20,7 @@ public class TestSpecificationElement implements SpecificationElement {
     private final Set<String> refTypes;
     private final Map<String, SpecificationElement> properties;
     private final SpecificationElement items;
-    private boolean required = false;
+    private boolean required;
 
     public TestSpecificationElement(String name, SpecificationElementType specificationElementType, Set<String> jsonTypes, List<SpecificationValidator> validators, Set<String> refTypes, Map<String, SpecificationElement> properties, SpecificationElement items) {
         this.name = name;
