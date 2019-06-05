@@ -7,7 +7,7 @@ module no.ssb.lds.persistence.neo4j {
     requires com.fasterxml.jackson.databind;
     requires org.neo4j.driver;
     requires java.logging;
-    requires jul.to.slf4j;
+    requires jul_to_slf4j;
     requires io.reactivex.rxjava2;
     requires org.reactivestreams;
 
