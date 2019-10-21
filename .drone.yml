@@ -31,7 +31,7 @@ steps:
   - name: test
     image: maven:3-jdk-11
     commands:
-      - mvn verify test -P ssb-bip,coverage --batch-mode --global-settings settings.xml
+      - mvn verify test -P ssb-bip,coverage,integration --batch-mode --global-settings settings.xml
     environment:
       MAVEN_HOME: /drone/src/.m2
       M2_HOME: /drone/src/.m2
@@ -74,18 +74,6 @@ steps:
     depends_on:
       - test
 
-  - name: integration
-    image: maven:3-jdk-11
-    commands:
-      - mvn verify -P ssb-bip,integration --batch-mode --global-settings settings.xml
-    environment:
-      MAVEN_HOME: /drone/src/.m2
-      M2_HOME: /drone/src/.m2
-    depends_on:
-      - sonarqube
-  #      - codacy
-  #      - codecov
-
   - name: publish-maven
     image: maven:3-jdk-11
     commands:
@@ -94,7 +82,9 @@ steps:
       MAVEN_HOME: /drone/src/.m2
       M2_HOME: /drone/src/.m2
     depends_on:
-      - integration
+      - sonarqube
+  #      - codacy
+  #      - codecov
 
   - name: slack
     image: plugins/slack
