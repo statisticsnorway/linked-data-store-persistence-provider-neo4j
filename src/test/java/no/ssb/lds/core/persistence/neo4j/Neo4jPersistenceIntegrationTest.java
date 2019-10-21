@@ -17,7 +17,7 @@ public class Neo4jPersistenceIntegrationTest extends PersistenceIntegrationTest 
     public void setup() {
 
         persistence = new Neo4jInitializer().initialize(namespace,
-                Map.of("neo4j.driver.url", "bolt://localhost:7687",
+                Map.of("neo4j.driver.url", "bolt://db-neo4j:7687",
                         "neo4j.driver.username", "neo4j",
                         "neo4j.driver.password", "PasSW0rd",
                         "neo4j.cypher.show", "true"),
