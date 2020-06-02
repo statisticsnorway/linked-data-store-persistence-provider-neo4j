@@ -3,9 +3,9 @@ package no.ssb.lds.core.persistence.neo4j;
 import no.ssb.lds.api.persistence.PersistenceInitializer;
 import no.ssb.lds.api.persistence.ProviderName;
 import no.ssb.lds.api.persistence.reactivex.RxJsonPersistence;
-import org.neo4j.driver.v1.AuthTokens;
-import org.neo4j.driver.v1.Driver;
-import org.neo4j.driver.v1.GraphDatabase;
+import org.neo4j.driver.AuthTokens;
+import org.neo4j.driver.Driver;
+import org.neo4j.driver.GraphDatabase;
 
 import java.util.Map;
 import java.util.Set;

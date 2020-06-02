@@ -1,8 +1,7 @@
 package no.ssb.lds.core.persistence.neo4j;
 
-import org.neo4j.driver.v1.Record;
-import org.neo4j.driver.v1.StatementResult;
-import org.neo4j.driver.v1.Value;
+import org.neo4j.driver.Result;
+import org.neo4j.driver.Value;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -89,21 +88,19 @@ class Neo4jIndexManagement {
 
     Neo4jIndexManagement(Neo4jTransaction transaction, String namespace, Set<String> managedDomains) {
         currentIndexes = new LinkedHashSet<>();
-        StatementResult statementResult = transaction.executeCypher(String.format("CALL db.indexes"));
-        while (statementResult.hasNext()) {
-            Record record = statementResult.next();
+        Result statementResult = transaction.executeCypher(String.format("CALL db.indexes"));
+        statementResult.forEachRemaining(record -> {
             Value labelValue = record.get("label");
             Value properties = record.get("properties");
             String label = labelValue.asString();
             List<String> propertyList = properties.asList(Value::asString);
             currentIndexes.add(new Index(label, propertyList, !label.endsWith("_E")));
-        }
+        });
         wantedIndexes = new LinkedHashSet<>();
         for (String managedDomain : managedDomains) {
             wantedIndexes.add(new Index(managedDomain, List.of("id"), true));
             wantedIndexes.add(new Index(managedDomain + "_E", List.of("path", "hashOrValue"), false));
         }
-        createMissingIndices(transaction);
     }
 
     void createMissingIndices(Neo4jTransaction transaction) {
@@ -114,7 +111,8 @@ class Neo4jIndexManagement {
         }
         for (Index index : wantedIndexes) {
             if (!currentIndexes.contains(index)) {
-                transaction.executeCypher(index.createCypherStatement());
+                String cypherStatement = index.createCypherStatement();
+                transaction.executeCypher(cypherStatement);
             }
         }
     }
