@@ -88,13 +88,16 @@ class Neo4jIndexManagement {
 
     Neo4jIndexManagement(Neo4jTransaction transaction, String namespace, Set<String> managedDomains) {
         currentIndexes = new LinkedHashSet<>();
-        Result statementResult = transaction.executeCypher(String.format("CALL db.indexes"));
+        Result statementResult = transaction.executeCypher("CALL db.indexes");
         statementResult.forEachRemaining(record -> {
-            Value labelValue = record.get("label");
-            Value properties = record.get("properties");
-            String label = labelValue.asString();
-            List<String> propertyList = properties.asList(Value::asString);
-            currentIndexes.add(new Index(label, propertyList, !label.endsWith("_E")));
+            Value labelValue = record.get("labelsOrTypes");
+            List<String> labels = labelValue.asList(Value::asString);
+            if (labels.size() > 0) {
+                String label = labels.get(0);
+                Value properties = record.get("properties");
+                List<String> propertyList = properties.asList(Value::asString);
+                currentIndexes.add(new Index(label, propertyList, !label.endsWith("_E")));
+            }
         });
         wantedIndexes = new LinkedHashSet<>();
         for (String managedDomain : managedDomains) {
