@@ -47,10 +47,12 @@ public class Neo4jInitializer implements PersistenceInitializer {
         boolean logCypher = Boolean.parseBoolean(configuration.get("neo4j.cypher.show"));
         Driver driver = open(neo4jDriverURL, neo4jDriverUsername, neo4jDriverPassword);
         Neo4jTransactionFactory transactionFactory = new Neo4jTransactionFactory(driver, logCypher);
+        /*
         try (Neo4jTransaction tx = transactionFactory.createTransaction(false)) {
             Neo4jIndexManagement indexManagement = new Neo4jIndexManagement(tx, defaultNamespace, managedDomains);
             indexManagement.createMissingIndices(tx);
         }
+        */
         return new Neo4jPersistence(transactionFactory);
     }
 

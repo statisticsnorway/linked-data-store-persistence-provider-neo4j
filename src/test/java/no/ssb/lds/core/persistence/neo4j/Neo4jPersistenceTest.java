@@ -10,6 +10,9 @@ import org.testng.annotations.Test;
 
 import java.io.IOException;
 import java.net.URL;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Collection;
@@ -38,12 +41,13 @@ public class Neo4jPersistenceTest {
         JsonNode node = loadJson("mix-map-and-array.json");
         Specification specification = createSpecificationAndRoot(Set.of(
                 objectNode(SpecificationElementType.MANAGED, "MixMapAndArray", Set.of(
+                        stringNode("id"),
                         arrayNode("child", objectNode("[]", Set.of(
                                 stringNode("name"),
                                 stringNode("born"),
                                 arrayNode("friend", objectNode("[]", Set.of(
                                         stringNode("since"),
-                                        stringNode("link")
+                                        refNode("link", Set.of("Person"))
                                 )))
                         ))),
                         objectNode("name", Set.of(
@@ -51,8 +55,83 @@ public class Neo4jPersistenceTest {
                                 stringNode("last")
                         ))
                 ))
-        ));
+        ), "interface Someone {\n" +
+                "}\n" +
+                "type MixMapAndArray implements Someone {\n" +
+                "  id: ID!\n" +
+                "  name: Name @relation(name: \"name\")\n" +
+                "  child: [Child] @relation(name: \"child\")\n" +
+                "}\n" +
+                "type Child {\n" +
+                "  name: String\n" +
+                "  born: String\n" +
+                "  friend: [Friend] @relation(name: \"friend\")\n" +
+                "}\n" +
+                "type Friend {\n" +
+                "  since: String\n" +
+                "  link: Person @link @relation(name: \"link\")\n" +
+                "}\n" +
+                "type Person implements Someone {\n" +
+                "  age: Int\n" +
+                "  name: Name @relation(name: \"name\")\n" +
+                "}\n" +
+                "type Name {\n" +
+                "  first: String\n" +
+                "  last: String\n" +
+                "}");
         createAndPresentCypher(specification, node, "1");
+    }
+
+    @Test
+    public void createFriend() throws IOException {
+        JsonNode node = loadJson("mix-map-and-array-friend.json");
+        Specification specification = createSpecificationAndRoot(Set.of(
+                objectNode(SpecificationElementType.MANAGED, "MixMapAndArray", Set.of(
+                        stringNode("id"),
+                        arrayNode("child", objectNode("[]", Set.of(
+                                stringNode("name"),
+                                stringNode("born"),
+                                arrayNode("friend", objectNode("[]", Set.of(
+                                        stringNode("since"),
+                                        refNode("link", Set.of("Person"))
+                                )))
+                        ))),
+                        objectNode("name", Set.of(
+                                stringNode("first"),
+                                stringNode("last")
+                        ))
+                )),
+                objectNode(SpecificationElementType.MANAGED, "Person", Set.of(
+                        objectNode("name", Set.of(
+                                stringNode("first"),
+                                stringNode("last")
+                        ))
+                ))
+        ), "interface Someone {\n" +
+                "}\n" +
+                "type MixMapAndArray implements Someone {\n" +
+                "  id: ID!\n" +
+                "  name: Name @relation(name: \"name\")\n" +
+                "  child: [Child] @relation(name: \"child\")\n" +
+                "}\n" +
+                "type Child {\n" +
+                "  name: String\n" +
+                "  born: String\n" +
+                "  friend: [Friend] @relation(name: \"friend\")\n" +
+                "}\n" +
+                "type Friend {\n" +
+                "  since: String\n" +
+                "  link: Person @link @relation(name: \"link\")\n" +
+                "}\n" +
+                "type Person implements Someone {\n" +
+                "  age: Int\n" +
+                "  name: Name @relation(name: \"name\")\n" +
+                "}\n" +
+                "type Name {\n" +
+                "  first: String\n" +
+                "  last: String\n" +
+                "}");
+        createAndPresentCypher(specification, "Person", node, "nate");
     }
 
     @Test
@@ -225,6 +304,10 @@ public class Neo4jPersistenceTest {
 
     private void createAndPresentCypher(Specification specification, JsonNode node, String id) {
         String theManagedDomain = specification.getManagedDomains().iterator().next();
+        createAndPresentCypher(specification, theManagedDomain, node, id);
+    }
+
+    private void createAndPresentCypher(Specification specification, String theManagedDomain, JsonNode node, String id) {
         Neo4jQueryAndParams qp = new Neo4jCreationalPatternFactory().creationalQueryAndParams(
                 specification,
                 theManagedDomain,
@@ -253,6 +336,18 @@ public class Neo4jPersistenceTest {
         if (!(dataparameter instanceof Collection)) {
             if (dataparameter instanceof String) {
                 return "'" + dataparameter + "'";
+            }
+            if (dataparameter instanceof ZonedDateTime) {
+                return "datetime('" + dataparameter + "')";
+            }
+            if (dataparameter instanceof LocalDateTime) {
+                return "localdatetime('" + dataparameter + "')";
+            }
+            if (dataparameter instanceof LocalDate) {
+                return "date('" + dataparameter + "')";
+            }
+            if (dataparameter instanceof LocalTime) {
+                return "localtime('" + dataparameter + "')";
             }
             return String.valueOf(dataparameter);
         }

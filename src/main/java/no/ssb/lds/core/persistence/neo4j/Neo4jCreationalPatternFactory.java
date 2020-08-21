@@ -1,6 +1,13 @@
 package no.ssb.lds.core.persistence.neo4j;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import graphql.language.FieldDefinition;
+import graphql.language.Node;
+import graphql.language.ObjectTypeDefinition;
+import graphql.language.StringValue;
+import graphql.language.TypeDefinition;
+import graphql.language.TypeName;
+import graphql.schema.idl.TypeDefinitionRegistry;
 import no.ssb.lds.api.json.JsonNavigationPath;
 import no.ssb.lds.api.persistence.DocumentKey;
 import no.ssb.lds.api.persistence.json.JsonDocument;
@@ -13,6 +20,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
@@ -27,7 +36,7 @@ class Neo4jCreationalPatternFactory {
 
     Neo4jQueryAndParams creationalQueryAndParams(Specification specification, String entity, List<JsonDocument> documentForEntityList) {
         SpecificationElement entitySpecificationElement = specification.getRootElement().getProperties().get(entity);
-        String cypher = creationalCypherForEntity(entitySpecificationElement);
+        String cypher = creationalCypherForEntity(specification.typeDefinitionRegistry(), entitySpecificationElement);
         List<Object> batch = new ArrayList<>();
         for (JsonDocument document : documentForEntityList) {
             DocumentKey key = document.key();
@@ -46,73 +55,116 @@ class Neo4jCreationalPatternFactory {
         return new Neo4jQueryAndParams(cypher, params);
     }
 
-    String creationalCypherForEntity(SpecificationElement specificationElement) {
+    String creationalCypherForEntity(TypeDefinitionRegistry typeDefinitionRegistry, SpecificationElement specificationElement) {
         if (!SpecificationElementType.MANAGED.equals(specificationElement.getSpecificationElementType())) {
             throw new IllegalArgumentException("specificationElement must be of type MANAGED");
         }
-        return creationalPatternByEntity.computeIfAbsent(specificationElement, e -> buildCreationalCypherForEntity(e));
+        return creationalPatternByEntity.computeIfAbsent(specificationElement, e -> buildCreationalCypherForEntity(typeDefinitionRegistry, e));
     }
 
     static final Pattern linkPattern = Pattern.compile("/?([^/]*)/([^/]*)");
 
-    static String buildCreationalCypherForEntity(SpecificationElement specificationElement) {
+    static String buildCreationalCypherForEntity(TypeDefinitionRegistry typeDefinitionRegistry, SpecificationElement specificationElement) {
         String entity = specificationElement.getName();
+        List<String> allTypesOfEntity = getAllTypesOfType(typeDefinitionRegistry, entity);
         StringBuilder cypher = new StringBuilder();
         cypher.append("UNWIND $batch AS record\n");
-        cypher.append("MERGE (r:").append(entity).append(" {id: record[0]}) WITH r, record[1] AS version, record[2] AS data\n");
-        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION {from: version}]->(m)-[:EMBED*]->(e) DETACH DELETE m, e WITH r, version, data\n");
-        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION]->() WHERE v.from <= version AND version < v.to WITH r, version, data, v AS prevVersion\n");
-        cypher.append("OPTIONAL MATCH (r:").append(entity).append(")-[v:VERSION]->() WHERE v.from > version WITH r, version, data, prevVersion, min(v.from) AS nextVersionFrom\n");
+        cypher.append("MERGE (r:").append(entity).append("_R:RESOURCE {id: record[0]}) WITH r, record[1] AS version, record[2] AS data\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF {from: version}]-(m)-[*]->(e:EMBEDDED) DETACH DELETE m, e WITH r, version, data\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from <= version AND COALESCE(version < v.to, true) WITH r, version, data, v AS prevVersion\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from > version WITH r, version, data, prevVersion, min(v.from) AS nextVersionFrom\n");
         cypher.append("FOREACH(d IN data |\n");
-        cypher.append("  MERGE (r)-[v:VERSION {from: version, to: coalesce(prevVersion.to, nextVersionFrom, datetime('9999-01-01T00:00:00.0Z[Etc/UTC]'))}]->(m:").append(entity).append("_E {type:'map', path:'$'})\n");
+        cypher.append("  CREATE (r)<-[v:VERSION_OF {from: version, to: coalesce(prevVersion.to, nextVersionFrom)}]-(m:").append(String.join(":", allTypesOfEntity)).append(":INSTANCE").append(")\n");
         cypher.append("  SET prevVersion.to = version");
         int i = 0;
         for (Map.Entry<String, SpecificationElement> entry : specificationElement.getProperties().entrySet()) {
-            traverseSpecification(cypher, entity, entry.getValue(), 1, "    ", "m", "m" + i, "d[" + i + "]");
+            traverseSpecification(cypher, typeDefinitionRegistry, entity, entry.getValue(), 1, "    ", "m", false, "m", "d[" + i + "]");
             i++;
         }
         cypher.append(")");
         return cypher.toString();
     }
 
-    static boolean isArrayElementNode(String nodeIdentifier) {
-        return nodeIdentifier.endsWith("i");
+    private static List<String> getAllTypesOfType(TypeDefinitionRegistry typeDefinitionRegistry, String type) {
+        TypeDefinition typeDefinition = typeDefinitionRegistry.getType(type).get();
+        List<String> implementedInterfaceNames = new ArrayList<>();
+        if (typeDefinition instanceof ObjectTypeDefinition) {
+            implementedInterfaceNames = ((ObjectTypeDefinition) typeDefinition).getImplements().stream()
+                    .map(a -> ((TypeName) a).getName())
+                    .collect(Collectors.toList());
+        }
+        implementedInterfaceNames.add(0, type);
+        return implementedInterfaceNames;
     }
 
-    static void traverseSpecification(StringBuilder cypher, String entity, SpecificationElement element, int depth, String indentation, String parentNodeIdentifier, String nodeIdentifier, String dataListIdentifier) {
-        String path = JsonNavigationPath.from(element).serialize();
+    static void traverseSpecification(StringBuilder cypher, TypeDefinitionRegistry typeDefinitionRegistry, String entity, SpecificationElement element, int depth, String indentation, String parentNodeIdentifier, boolean parentIsArray, String nodeIdentifier, String dataListIdentifier) {
+        JsonNavigationPath jsonNavigationPath = JsonNavigationPath.from(element);
         cypher.append("\n").append(indentation).append("FOREACH(d").append(depth).append(" IN ").append(dataListIdentifier).append(" |");
         indentation += "  ";
         dataListIdentifier = "d" + depth;
         String relationPath = element.getName();
-        boolean parentIsArray = isArrayElementNode(nodeIdentifier);
         if (parentIsArray) {
-            relationPath = "[]";
+            relationPath = element.getParent().getName();
         }
-        if (element.getJsonTypes().contains("object")) {
-            cypher.append("\n").append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:").append("EMBED").append("{path: '").append(relationPath).append("'");
-            if (parentIsArray) {
-                cypher.append(", index: ").append(dataListIdentifier).append("[0]");
+
+        FieldDefinition fieldDefinition = null;
+        TypeDefinition typeDefinition;
+        String[] navPaths = jsonNavigationPath.getPath();
+        Deque<String> deque = new LinkedList<>(List.of(navPaths));
+        if ("$".equals(deque.getFirst())) {
+            typeDefinition = typeDefinitionRegistry.getType(entity).get();
+            deque.removeFirst();
+        } else {
+            throw new IllegalStateException("Navigation path is missing the first '$' element");
+        }
+        while (!deque.isEmpty()) {
+            String elem = deque.getFirst();
+            if ("[]".equals(elem)) {
+            } else {
+                List<Node> children = typeDefinition.getChildren();
+                boolean found = false;
+                for (Node child : children) {
+                    if (child instanceof FieldDefinition) {
+                        FieldDefinition def = (FieldDefinition) child;
+                        String fieldName = def.getName();
+                        if (elem.equals(fieldName)) {
+                            found = true;
+                            fieldDefinition = def;
+                            typeDefinition = typeDefinitionRegistry.getType(def.getType()).get();
+                            break;
+                        }
+                    }
+                }
+                if (!found) {
+                    throw new IllegalStateException("Element not found: " + elem + " in type: " + typeDefinition.toString());
+                }
             }
-            cypher.append("}]->");
-            cypher.append("(").append(nodeIdentifier).append(":").append(entity).append("_E {type: 'map', path: '").append(path).append("'})");
+            deque.removeFirst();
+        }
+        String embeddedType = typeDefinition.getName();
+
+        if (element.getJsonTypes().contains("object")) {
+            nodeIdentifier = parentNodeIdentifier + "o";
+            String relationType = ((StringValue) fieldDefinition.getDirective("relation").getArgument("name").getValue()).getValue();
+            cypher.append("\n").append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:").append(relationType);
+            if (parentIsArray) {
+                cypher.append("{index: ").append(dataListIdentifier).append("[0]}");
+            }
+            cypher.append("]->");
+            List<String> allTypesOfType = getAllTypesOfType(typeDefinitionRegistry, embeddedType);
+            cypher.append("(").append(nodeIdentifier).append(":").append(String.join(":", allTypesOfType)).append(":EMBEDDED").append(")");
             int i = 0;
             for (Map.Entry<String, SpecificationElement> entry : element.getProperties().entrySet()) {
                 String childDataListIdentifier = dataListIdentifier + (parentIsArray ? "[1]" : "") + "[" + i + "]";
-                String childNodeIdentifier = nodeIdentifier + "p" + i;
-                traverseSpecification(cypher, entity, entry.getValue(), depth + 1, indentation, nodeIdentifier, childNodeIdentifier, childDataListIdentifier);
+                traverseSpecification(cypher, typeDefinitionRegistry, entity, entry.getValue(), depth + 1, indentation, nodeIdentifier, false, nodeIdentifier, childDataListIdentifier);
                 i++;
             }
         } else if (element.getJsonTypes().contains("array")) {
-            cypher.append("\n").append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:").append("EMBED").append("{path: '").append(relationPath).append("'");
             if (parentIsArray) {
-                cypher.append(", index: ").append(dataListIdentifier).append("[0]");
+                throw new RuntimeException("Nested array is unsupported");
             }
-            cypher.append("}]->");
-            cypher.append("(").append(nodeIdentifier).append(":").append(entity).append("_E {type:'array', path: '").append(path).append("'})");
             String childDataListIdentifier = dataListIdentifier + (parentIsArray ? "[1]" : "");
-            String childNodeIdentifier = nodeIdentifier + "i";
-            traverseSpecification(cypher, entity, element.getItems(), depth + 1, indentation, nodeIdentifier, childNodeIdentifier, childDataListIdentifier);
+            traverseSpecification(cypher, typeDefinitionRegistry, entity, element.getItems(), depth + 1, indentation, nodeIdentifier, true, nodeIdentifier, childDataListIdentifier);
         } else {
 
             // value node
@@ -123,10 +175,14 @@ class Neo4jCreationalPatternFactory {
 
             if (isReference) {
 
+                nodeIdentifier += "r";
                 List<String> sortedRefTypes = new ArrayList<>(new TreeSet<>(parentIsArray ? element.getParent().getRefTypes() : element.getRefTypes()));
 
                 for (int i = 0; i < sortedRefTypes.size(); i++) {
                     String refType = sortedRefTypes.get(i);
+
+                    List<String> allTypesOfReferencedType = getAllTypesOfType(typeDefinitionRegistry, refType);
+
                     String refDataIdentifier = "d" + (depth + 1);
                     if (i > 0 && i < sortedRefTypes.size() - 1) {
                         cypher.append("\n");
@@ -136,54 +192,28 @@ class Neo4jCreationalPatternFactory {
                     cypher.append(parentIsArray ? "[1]" : "").append("[").append(i).append("]").append(" |");
 
                     cypher.append("\n").append(indentation).append("  ");
-                    cypher.append("MERGE (").append(nodeIdentifier).append(":").append(refType).append(" {id: ").append(refDataIdentifier).append("})");
+                    cypher.append("MERGE (").append(nodeIdentifier).append(":").append(String.join("_R:", allTypesOfReferencedType)).append("_R:RESOURCE").append(" {id: ").append(refDataIdentifier).append("})");
 
                     cypher.append("\n").append(indentation).append("  ");
-                    cypher.append("CREATE (").append(parentNodeIdentifier).append(")-[:").append("REF {path: '").append(relationPath).append("'");
+                    String relationType = ((StringValue) fieldDefinition.getDirective("relation").getArgument("name").getValue()).getValue();
+                    cypher.append("CREATE (").append(parentNodeIdentifier).append(")-[:").append(relationType);
                     if (parentIsArray) {
-                        cypher.append(", index: ").append(dataListIdentifier).append("[0]");
+                        cypher.append("{index: ").append(dataListIdentifier).append("[0]}");
                     }
-                    cypher.append("}]->(").append(nodeIdentifier).append(")");
+                    cypher.append("]->(").append(nodeIdentifier).append(")");
 
                     cypher.append(")"); // end foreach
                 }
 
             } else {
 
-                cypher.append("\n").append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:").append("EMBED").append("{path: '").append(relationPath).append("'");
-                if (parentIsArray) {
-                    cypher.append(", index: ").append(dataListIdentifier).append("[0]");
-                }
-                cypher.append("}]->");
+                // scalar
 
-                // start node and properties
-                cypher.append("(").append(nodeIdentifier).append(":").append(entity).append("_E {");
-
-                // type property
-                String jsonType = element.getJsonTypes().contains("string") ? "string" : element.getJsonTypes().contains("number") ? "number" : element.getJsonTypes().contains("boolean") ? "boolean" : element.getJsonTypes().stream().collect(Collectors.joining(","));
-                cypher.append("type: '").append(jsonType).append("'");
-
-                // path property
-                cypher.append(", path: '").append(path).append("'");
-
-                // value property
-                cypher.append(", value: ");
+                cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append(".").append(relationPath).append(" = ");
                 cypher.append(dataListIdentifier);
                 if (parentIsArray) {
                     cypher.append("[1]");
                 }
-                cypher.append("[0]"); // value
-
-                // hashOrValue property
-                cypher.append(", hashOrValue: ");
-                cypher.append(dataListIdentifier);
-                if (parentIsArray) {
-                    cypher.append("[1]");
-                }
-                cypher.append("[1]"); // hashOrValue
-
-                // end properties
-                cypher.append("})");
             }
         }
         cypher.append(")"); // end foreach
@@ -261,16 +291,16 @@ class Neo4jCreationalPatternFactory {
                 if (node.isTextual()) {
                     String str = node.textValue();
                     if (str.length() > 40) {
-                        data.add(List.of(str, hashOf(str)));
+                        data.add(str);
                     } else {
-                        data.add(List.of(str, str));
+                        data.add(str);
                     }
                 } else if (node.isIntegralNumber()) {
-                    data.add(List.of(node.longValue(), node.longValue()));
+                    data.add(node.longValue());
                 } else if (node.isFloatingPointNumber()) {
-                    data.add(List.of(node.doubleValue(), node.doubleValue()));
+                    data.add(node.doubleValue());
                 } else if (node.isBoolean()) {
-                    data.add(List.of(node.booleanValue(), node.booleanValue()));
+                    data.add(node.booleanValue());
                 } else {
                     throw new IllegalStateException("Got unsupported jackson-specific JsonNodeType " + node.getNodeType().name() + ", value: " + node.toString());
                 }
