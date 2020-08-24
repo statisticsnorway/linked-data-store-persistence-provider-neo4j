@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
 
 class Neo4jCreationalPatternFactory {
 
+    static final String EMPTY_ARRAY_FIELD_PREFIX = "_lds_a_";
+
     private Map<SpecificationElement, String> creationalPatternByEntity = new ConcurrentHashMap<>();
 
     Neo4jQueryAndParams creationalQueryAndParams(Specification specification, String entity, List<JsonDocument> documentForEntityList) {
@@ -167,7 +169,7 @@ class Neo4jCreationalPatternFactory {
             if (parentIsArray) {
                 throw new RuntimeException("Nested array is unsupported");
             }
-            cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append("._lds_a_").append(element.getName()).append(" = true");
+            cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append(EMPTY_ARRAY_FIELD_PREFIX).append(element.getName()).append(" = true");
             String childDataListIdentifier = dataListIdentifier + (parentIsArray ? "[1]" : "");
             traverseSpecification(cypher, typeDefinitionRegistry, entity, element.getItems(), depth + 1, indentation, nodeIdentifier, true, nodeIdentifier, childDataListIdentifier);
         } else {

@@ -35,6 +35,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static no.ssb.lds.core.persistence.neo4j.Neo4jCreationalPatternFactory.EMPTY_ARRAY_FIELD_PREFIX;
 import static no.ssb.lds.core.persistence.neo4j.Neo4jCreationalPatternFactory.hashOf;
 
 public class Neo4jPersistence implements RxJsonPersistence {
@@ -134,8 +135,8 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     private static FlattenedDocumentLeafNode extractLeafNodeFromField(DocumentKey documentKey, String pathWithIndices, Map.Entry<String, Object> valueByFieldName) {
         String fieldName = valueByFieldName.getKey();
-        if (fieldName.startsWith("_lds_a_")) {
-            String emptyArrayFieldName = fieldName.substring("_lds_a_".length());
+        if (fieldName.startsWith(EMPTY_ARRAY_FIELD_PREFIX)) {
+            String emptyArrayFieldName = fieldName.substring(EMPTY_ARRAY_FIELD_PREFIX.length());
             return new FlattenedDocumentLeafNode(documentKey, pathWithIndices + "." + emptyArrayFieldName, FragmentType.EMPTY_ARRAY, null, Integer.MAX_VALUE);
         }
         Object fieldValue = valueByFieldName.getValue();
