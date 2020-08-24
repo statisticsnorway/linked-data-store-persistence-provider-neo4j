@@ -31,6 +31,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -48,6 +49,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath,
                                                    DocumentKey documentKey, boolean deleted) {
+        if (deleted) {
+            return new JsonDocument(documentKey, (JsonNode) null);
+        }
         FlattenedDocument flattenedDocument = new FlattenedDocument(documentKey, leafNodesByPath, deleted);
         JsonNode jsonObject = new FlattenedDocumentToJson(flattenedDocument).toJsonNode();
         return new JsonDocument(documentKey, jsonObject);
@@ -74,12 +78,12 @@ public class Neo4jPersistence implements RxJsonPersistence {
      */
     static Collection<FlattenedDocumentLeafNode> getLeafsFromRootNodeOfRecord(Record record, DocumentKey documentKey) {
         if (record.get("m").isNull()) {
-            return List.of(new FlattenedDocumentLeafNode(documentKey, null, FragmentType.NULL, null, Integer.MAX_VALUE));
+            return List.of(new FlattenedDocumentLeafNode(documentKey, "$", FragmentType.NULL, null, Integer.MAX_VALUE));
         }
 
         Node rootNode = record.get("m").asNode();
         if (rootNode.containsKey("_deleted") && rootNode.get("_deleted").asBoolean(false)) {
-            return List.of(new FlattenedDocumentLeafNode(documentKey, null, FragmentType.DELETED, null, Integer.MAX_VALUE));
+            return List.of(new FlattenedDocumentLeafNode(documentKey, "$", FragmentType.DELETED, null, Integer.MAX_VALUE));
         }
 
         String pathWithIndices = "$";
@@ -94,17 +98,8 @@ public class Neo4jPersistence implements RxJsonPersistence {
      */
     static Collection<FlattenedDocumentLeafNode> getLeafsFromRecord(Record record, DocumentKey documentKey) {
 
-        if (record.get("m").isNull()) {
-            return List.of(new FlattenedDocumentLeafNode(documentKey, null, FragmentType.NULL, null, Integer.MAX_VALUE));
-        }
-
-        Node rootNode = record.get("m").asNode();
-        if (rootNode.containsKey("_deleted") && rootNode.get("_deleted").asBoolean(false)) {
-            return List.of(new FlattenedDocumentLeafNode(documentKey, null, FragmentType.DELETED, null, Integer.MAX_VALUE));
-        }
-
         if (record.get("p").isNull()) {
-            throw new UnsupportedOperationException("TODO: support documents with only root-node"); // TODO
+            return Collections.emptyList();
         }
 
         Path path = record.get("p").asPath();
@@ -180,7 +175,10 @@ public class Neo4jPersistence implements RxJsonPersistence {
                         })
                                 .toList()
                                 .map(listOfLeafNodes -> listOfLeafNodes.stream().collect(Collectors.toMap(FlattenedDocumentLeafNode::path, Function.identity())))
-                                .map(map -> createJsonDocument(map, recordById.getKey(), false))
+                                .map(map -> createJsonDocument(map, recordById.getKey(), Optional.ofNullable(map.get("$"))
+                                        .map(FlattenedDocumentLeafNode::type)
+                                        .map(type -> type == FragmentType.DELETED)
+                                        .orElse(Boolean.FALSE)))
                                 .toFlowable()
                 );
     }
