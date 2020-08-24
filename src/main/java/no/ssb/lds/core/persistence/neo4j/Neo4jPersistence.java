@@ -134,6 +134,10 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     private static FlattenedDocumentLeafNode extractLeafNodeFromField(DocumentKey documentKey, String pathWithIndices, Map.Entry<String, Object> valueByFieldName) {
         String fieldName = valueByFieldName.getKey();
+        if (fieldName.startsWith("_lds_a_")) {
+            String emptyArrayFieldName = fieldName.substring("_lds_a_".length());
+            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices + "." + emptyArrayFieldName, FragmentType.EMPTY_ARRAY, null, Integer.MAX_VALUE);
+        }
         Object fieldValue = valueByFieldName.getValue();
         String finalPathWithIndices = pathWithIndices + "." + fieldName;
         if (fieldValue instanceof String) {

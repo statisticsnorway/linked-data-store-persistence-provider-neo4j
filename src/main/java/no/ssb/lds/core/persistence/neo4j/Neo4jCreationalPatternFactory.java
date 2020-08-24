@@ -167,6 +167,7 @@ class Neo4jCreationalPatternFactory {
             if (parentIsArray) {
                 throw new RuntimeException("Nested array is unsupported");
             }
+            cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append("._lds_a_").append(element.getName()).append(" = true");
             String childDataListIdentifier = dataListIdentifier + (parentIsArray ? "[1]" : "");
             traverseSpecification(cypher, typeDefinitionRegistry, entity, element.getItems(), depth + 1, indentation, nodeIdentifier, true, nodeIdentifier, childDataListIdentifier);
         } else {
