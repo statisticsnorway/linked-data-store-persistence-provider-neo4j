@@ -19,7 +19,6 @@ import no.ssb.lds.api.persistence.reactivex.RxJsonPersistence;
 import no.ssb.lds.api.persistence.streaming.FragmentType;
 import no.ssb.lds.api.specification.Specification;
 import org.neo4j.driver.Record;
-import org.neo4j.driver.Value;
 import org.neo4j.driver.types.Node;
 import org.neo4j.driver.types.Path;
 import org.neo4j.driver.types.Relationship;
@@ -63,8 +62,8 @@ public class Neo4jPersistence implements RxJsonPersistence {
             // Empty path if deleted.
             return "$";
         } else {
-            List<Path> paths = record.get("p").asList(Value::asPath);
-            return computePath(paths);
+            Path path = record.get("p").asPath();
+            return computePath(List.of(path));
         }
     }
 
@@ -72,7 +71,26 @@ public class Neo4jPersistence implements RxJsonPersistence {
      * Convert the {@link Record} to {@link FlattenedDocumentLeafNode}.
      * <p>
      * Documents marked as deleted will be returned as empty.
-     * TODO: I think this is different in other implementations.
+     */
+    static Collection<FlattenedDocumentLeafNode> getLeafsFromRootNodeOfRecord(Record record, DocumentKey documentKey) {
+        if (record.get("m").isNull()) {
+            return List.of(new FlattenedDocumentLeafNode(documentKey, null, FragmentType.NULL, null, Integer.MAX_VALUE));
+        }
+
+        Node rootNode = record.get("m").asNode();
+        if (rootNode.containsKey("_deleted") && rootNode.get("_deleted").asBoolean(false)) {
+            return List.of(new FlattenedDocumentLeafNode(documentKey, null, FragmentType.DELETED, null, Integer.MAX_VALUE));
+        }
+
+        String pathWithIndices = "$";
+
+        return extractLeafsFromNode(documentKey, rootNode, pathWithIndices);
+    }
+
+    /**
+     * Convert the {@link Record} to {@link FlattenedDocumentLeafNode}.
+     * <p>
+     * Documents marked as deleted will be returned as empty.
      */
     static Collection<FlattenedDocumentLeafNode> getLeafsFromRecord(Record record, DocumentKey documentKey) {
 
@@ -86,7 +104,7 @@ public class Neo4jPersistence implements RxJsonPersistence {
         }
 
         if (record.get("p").isNull()) {
-            throw new UnsupportedOperationException("TODO: support ddocuments with only root-node"); // TODO
+            throw new UnsupportedOperationException("TODO: support documents with only root-node"); // TODO
         }
 
         Path path = record.get("p").asPath();
@@ -106,31 +124,31 @@ public class Neo4jPersistence implements RxJsonPersistence {
             String link = "/" + linkTargetEntity + "/" + id;
             return List.of(new FlattenedDocumentLeafNode(documentKey, pathWithIndices, FragmentType.STRING, link, Integer.MAX_VALUE));
         } else {
-            List<FlattenedDocumentLeafNode> result = new ArrayList<>();
-            for (Map.Entry<String, Object> valueByFieldName : valueNode.asMap().entrySet()) {
-                String finalPathWithIndices = pathWithIndices + "." + valueByFieldName.getKey();
-                Value typeValue = valueNode.get("type");
-                String type = typeValue.asString();
-                Value valueValue = valueNode.get("value");
-                if ("string".equals(type)) {
-                    String stringValue = valueValue.asString();
-                    result.add(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.STRING, stringValue, Integer.MAX_VALUE));
-                } else if ("number".equals(type)) {
-                    String stringValue = String.valueOf(valueValue.asNumber());
-                    result.add(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.NUMERIC, stringValue, Integer.MAX_VALUE));
-                } else if ("boolean".equals(type)) {
-                    String stringValue = String.valueOf(valueValue.asBoolean());
-                    result.add(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.BOOLEAN, stringValue, Integer.MAX_VALUE));
-                } else if ("map".equals(type)) {
-                    result.add(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.EMPTY_OBJECT, null, Integer.MAX_VALUE));
-                } else if ("array".equals(type)) {
-                    result.add(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.EMPTY_ARRAY, null, Integer.MAX_VALUE));
-                } else {
-                    throw new IllegalStateException("type not supported: " + typeValue.asString());
-                }
-            }
-            return result;
+            return extractLeafsFromNode(documentKey, valueNode, pathWithIndices);
         }
+    }
+
+    private static List<FlattenedDocumentLeafNode> extractLeafsFromNode(DocumentKey documentKey, Node rootNode, String pathWithIndices) {
+        List<FlattenedDocumentLeafNode> result = new ArrayList<>();
+        for (Map.Entry<String, Object> valueByFieldName : rootNode.asMap().entrySet()) {
+            FlattenedDocumentLeafNode leaf = extractLeafNodeFromField(documentKey, pathWithIndices, valueByFieldName);
+            result.add(leaf);
+        }
+        return result;
+    }
+
+    private static FlattenedDocumentLeafNode extractLeafNodeFromField(DocumentKey documentKey, String pathWithIndices, Map.Entry<String, Object> valueByFieldName) {
+        String fieldName = valueByFieldName.getKey();
+        Object fieldValue = valueByFieldName.getValue();
+        String finalPathWithIndices = pathWithIndices + "." + fieldName;
+        if (fieldValue instanceof String) {
+            return new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.STRING, (String) fieldValue, Integer.MAX_VALUE);
+        } else if (fieldValue instanceof Number) {
+            return new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.NUMERIC, String.valueOf(fieldValue), Integer.MAX_VALUE);
+        } else if (fieldValue instanceof Boolean) {
+            return new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.BOOLEAN, String.valueOf(fieldValue), Integer.MAX_VALUE);
+        }
+        throw new IllegalStateException("type not supported: " + fieldValue.getClass().getName());
     }
 
     /**
@@ -146,10 +164,20 @@ public class Neo4jPersistence implements RxJsonPersistence {
      * Convert {@link Record}s stream {@link JsonDocument} stream.
      */
     static Flowable<JsonDocument> toDocuments(Flowable<Record> records, String nameSpace, String entityName) {
+        Map<DocumentKey, Collection<FlattenedDocumentLeafNode>> leafsFromRootByDocumentKey = new LinkedHashMap<>();
         return records.groupBy(record ->
                 getKeyFromRecord(record, nameSpace, entityName))
                 .concatMapEager(recordById ->
-                        recordById.flatMap(record -> Flowable.fromIterable(getLeafsFromRecord(record, recordById.getKey())))
+                        recordById.flatMap(record -> {
+                            List<FlattenedDocumentLeafNode> leafs = new ArrayList<>();
+                            leafsFromRootByDocumentKey.computeIfAbsent(recordById.getKey(), k -> {
+                                Collection<FlattenedDocumentLeafNode> leafsFromRootNodeOfRecord = getLeafsFromRootNodeOfRecord(record, recordById.getKey());
+                                leafs.addAll(leafsFromRootNodeOfRecord); // merge with first record only
+                                return leafsFromRootNodeOfRecord;
+                            });
+                            leafs.addAll(getLeafsFromRecord(record, recordById.getKey()));
+                            return Flowable.fromIterable(leafs);
+                        })
                                 .toList()
                                 .map(listOfLeafNodes -> listOfLeafNodes.stream().collect(Collectors.toMap(FlattenedDocumentLeafNode::path, Function.identity())))
                                 .map(map -> createJsonDocument(map, recordById.getKey(), false))
