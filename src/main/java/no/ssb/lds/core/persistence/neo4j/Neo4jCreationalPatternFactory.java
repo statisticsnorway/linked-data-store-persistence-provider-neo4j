@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import graphql.language.FieldDefinition;
 import graphql.language.Node;
 import graphql.language.ObjectTypeDefinition;
-import graphql.language.StringValue;
 import graphql.language.TypeDefinition;
 import graphql.language.TypeName;
 import graphql.schema.idl.TypeDefinitionRegistry;
@@ -145,7 +144,12 @@ class Neo4jCreationalPatternFactory {
 
         if (element.getJsonTypes().contains("object")) {
             nodeIdentifier = parentNodeIdentifier + "o";
-            String relationType = ((StringValue) fieldDefinition.getDirective("relation").getArgument("name").getValue()).getValue();
+            String relationType;
+            if (parentIsArray) {
+                relationType = element.getParent().getName();
+            } else {
+                relationType = element.getName();
+            }
             cypher.append("\n").append(indentation).append("CREATE (").append(parentNodeIdentifier).append(")-[:").append(relationType);
             if (parentIsArray) {
                 cypher.append("{index: ").append(dataListIdentifier).append("[0]}");
@@ -195,7 +199,12 @@ class Neo4jCreationalPatternFactory {
                     cypher.append("MERGE (").append(nodeIdentifier).append(":").append(String.join("_R:", allTypesOfReferencedType)).append("_R:RESOURCE").append(" {id: ").append(refDataIdentifier).append("})");
 
                     cypher.append("\n").append(indentation).append("  ");
-                    String relationType = ((StringValue) fieldDefinition.getDirective("relation").getArgument("name").getValue()).getValue();
+                    String relationType;
+                    if (parentIsArray) {
+                        relationType = element.getParent().getName();
+                    } else {
+                        relationType = element.getName();
+                    }
                     cypher.append("CREATE (").append(parentNodeIdentifier).append(")-[:").append(relationType);
                     if (parentIsArray) {
                         cypher.append("{index: ").append(dataListIdentifier).append("[0]}");
