@@ -169,7 +169,14 @@ class Neo4jCreationalPatternFactory {
             if (parentIsArray) {
                 throw new RuntimeException("Nested array is unsupported");
             }
-            cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append(".").append(EMPTY_ARRAY_FIELD_PREFIX).append(element.getName()).append(" = true");
+            // there is always exactly one child of any array specification element, otherwise there is a schema error
+            SpecificationElement theItems = element.getItems();
+            if (element.getSpecificationElementType() != SpecificationElementType.REF
+                    && theItems.getProperties().isEmpty()) {
+                // array of simple types, no need for array indicator
+            } else {
+                cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append(".").append(EMPTY_ARRAY_FIELD_PREFIX).append(element.getName()).append(" = true");
+            }
             String childDataListIdentifier = dataListIdentifier + (parentIsArray ? "[1]" : "");
             traverseSpecification(cypher, typeDefinitionRegistry, entity, element.getItems(), depth + 1, indentation, nodeIdentifier, true, nodeIdentifier, childDataListIdentifier);
         } else {
@@ -223,9 +230,6 @@ class Neo4jCreationalPatternFactory {
 
                 cypher.append("\n").append(indentation).append("SET ").append(nodeIdentifier).append(".").append(relationPath).append(" = ");
                 cypher.append(dataListIdentifier);
-                if (parentIsArray) {
-                    cypher.append("[1]");
-                }
             }
         }
         cypher.append(")"); // end foreach
@@ -252,12 +256,23 @@ class Neo4jCreationalPatternFactory {
                 }
             } else if (node.isArray()) {
                 SpecificationElement childElement = element.getItems();
-                for (int i = 0; i < node.size(); i++) {
-                    JsonNode childNode = node.get(i);
+                if (element.getSpecificationElementType() != SpecificationElementType.REF
+                        && childElement.getProperties().isEmpty()) {
+                    // array of simple types, no need for array index
                     List<Object> childData = new ArrayList<>();
                     containerValue.add(childData);
-                    childData.add(i);
-                    convertJsonDocumentToMultiDimensionalCypherData(childData, childNode, childElement);
+                    for (int i = 0; i < node.size(); i++) {
+                        JsonNode childNode = node.get(i);
+                        convertJsonDocumentToMultiDimensionalCypherData(childData, childNode, childElement);
+                    }
+                } else {
+                    for (int i = 0; i < node.size(); i++) {
+                        JsonNode childNode = node.get(i);
+                        List<Object> childData = new ArrayList<>();
+                        containerValue.add(childData);
+                        childData.add(i);
+                        convertJsonDocumentToMultiDimensionalCypherData(childData, childNode, childElement);
+                    }
                 }
             }
         } else {
@@ -301,12 +316,7 @@ class Neo4jCreationalPatternFactory {
                 // value node
 
                 if (node.isTextual()) {
-                    String str = node.textValue();
-                    if (str.length() > 40) {
-                        data.add(str);
-                    } else {
-                        data.add(str);
-                    }
+                    data.add(node.textValue());
                 } else if (node.isIntegralNumber()) {
                     data.add(node.longValue());
                 } else if (node.isFloatingPointNumber()) {

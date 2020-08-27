@@ -127,26 +127,47 @@ public class Neo4jPersistence implements RxJsonPersistence {
     private static List<FlattenedDocumentLeafNode> extractLeafsFromNode(DocumentKey documentKey, Node rootNode, String pathWithIndices) {
         List<FlattenedDocumentLeafNode> result = new ArrayList<>();
         for (Map.Entry<String, Object> valueByFieldName : rootNode.asMap().entrySet()) {
-            FlattenedDocumentLeafNode leaf = extractLeafNodeFromField(documentKey, pathWithIndices, valueByFieldName);
-            result.add(leaf);
+            List<FlattenedDocumentLeafNode> leafs = extractLeafNodesFromField(documentKey, pathWithIndices, valueByFieldName);
+            result.addAll(leafs);
         }
         return result;
     }
 
-    private static FlattenedDocumentLeafNode extractLeafNodeFromField(DocumentKey documentKey, String pathWithIndices, Map.Entry<String, Object> valueByFieldName) {
+    private static List<FlattenedDocumentLeafNode> extractLeafNodesFromField(DocumentKey documentKey, String pathWithIndices, Map.Entry<String, Object> valueByFieldName) {
         String fieldName = valueByFieldName.getKey();
         if (fieldName.startsWith(EMPTY_ARRAY_FIELD_PREFIX)) {
             String emptyArrayFieldName = fieldName.substring(EMPTY_ARRAY_FIELD_PREFIX.length());
-            return new FlattenedDocumentLeafNode(documentKey, pathWithIndices + "." + emptyArrayFieldName, FragmentType.EMPTY_ARRAY, null, Integer.MAX_VALUE);
+            return List.of(new FlattenedDocumentLeafNode(documentKey, pathWithIndices + "." + emptyArrayFieldName, FragmentType.EMPTY_ARRAY, "[]", Integer.MAX_VALUE));
         }
         Object fieldValue = valueByFieldName.getValue();
         String finalPathWithIndices = pathWithIndices + "." + fieldName;
         if (fieldValue instanceof String) {
-            return new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.STRING, (String) fieldValue, Integer.MAX_VALUE);
+            return List.of(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.STRING, (String) fieldValue, Integer.MAX_VALUE));
         } else if (fieldValue instanceof Number) {
-            return new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.NUMERIC, String.valueOf(fieldValue), Integer.MAX_VALUE);
+            return List.of(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.NUMERIC, String.valueOf(fieldValue), Integer.MAX_VALUE));
         } else if (fieldValue instanceof Boolean) {
-            return new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.BOOLEAN, String.valueOf(fieldValue), Integer.MAX_VALUE);
+            return List.of(new FlattenedDocumentLeafNode(documentKey, finalPathWithIndices, FragmentType.BOOLEAN, String.valueOf(fieldValue), Integer.MAX_VALUE));
+        } else if (fieldValue instanceof List) {
+            List arrayFieldValue = (List) fieldValue;
+            if (arrayFieldValue.isEmpty()) {
+                return Collections.emptyList();
+            }
+            int i = 0;
+            List<FlattenedDocumentLeafNode> result = new ArrayList<>(arrayFieldValue.size());
+            for (Object arrayElement : arrayFieldValue) {
+                String arrayElementPath = finalPathWithIndices + "[" + i + "]";
+                if (arrayElement instanceof String) {
+                    result.add(new FlattenedDocumentLeafNode(documentKey, arrayElementPath, FragmentType.STRING, (String) arrayElement, Integer.MAX_VALUE));
+                } else if (arrayElement instanceof Number) {
+                    result.add(new FlattenedDocumentLeafNode(documentKey, arrayElementPath, FragmentType.NUMERIC, String.valueOf(arrayElement), Integer.MAX_VALUE));
+                } else if (arrayElement instanceof Boolean) {
+                    result.add(new FlattenedDocumentLeafNode(documentKey, arrayElementPath, FragmentType.BOOLEAN, String.valueOf(arrayElement), Integer.MAX_VALUE));
+                } else {
+                    throw new IllegalStateException("type not supported: " + fieldValue.getClass().getName());
+                }
+                i++;
+            }
+            return result;
         }
         throw new IllegalStateException("type not supported: " + fieldValue.getClass().getName());
     }
