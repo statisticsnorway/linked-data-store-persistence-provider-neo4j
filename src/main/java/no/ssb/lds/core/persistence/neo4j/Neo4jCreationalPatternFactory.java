@@ -195,8 +195,6 @@ class Neo4jCreationalPatternFactory {
                 for (int i = 0; i < sortedRefTypes.size(); i++) {
                     String refType = sortedRefTypes.get(i);
 
-                    List<String> allTypesOfReferencedType = getAllTypesOfType(typeDefinitionRegistry, refType);
-
                     String refDataIdentifier = "d" + (depth + 1);
                     if (i > 0 && i < sortedRefTypes.size() - 1) {
                         cypher.append("\n");
@@ -206,7 +204,7 @@ class Neo4jCreationalPatternFactory {
                     cypher.append(parentIsArray ? "[1]" : "").append("[").append(i).append("]").append(" |");
 
                     cypher.append("\n").append(indentation).append("  ");
-                    cypher.append("MERGE (").append(nodeIdentifier).append(":").append(String.join("_R:", allTypesOfReferencedType)).append("_R:RESOURCE").append(" {id: ").append(refDataIdentifier).append("})");
+                    cypher.append("MERGE (").append(nodeIdentifier).append(":").append(refType).append("_R:RESOURCE").append(" {id: ").append(refDataIdentifier).append("})");
 
                     cypher.append("\n").append(indentation).append("  ");
                     String relationType;
