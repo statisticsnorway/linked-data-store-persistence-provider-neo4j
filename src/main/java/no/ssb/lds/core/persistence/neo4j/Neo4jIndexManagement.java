@@ -1,18 +1,13 @@
 package no.ssb.lds.core.persistence.neo4j;
 
-import org.neo4j.driver.Result;
-import org.neo4j.driver.Value;
-
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 class Neo4jIndexManagement {
 
     private final Set<Index> wantedIndexes;
-    private final Set<Index> currentIndexes;
 
     static class Index {
         final String label;
@@ -23,44 +18,6 @@ class Neo4jIndexManagement {
             this.label = label;
             this.properties = new LinkedHashSet<>(properties);
             this.uniqueConstraint = uniqueConstraint;
-        }
-
-        String createUniqueConstraintCypher() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("CREATE CONSTRAINT ON (n:");
-            sb.append(label);
-            sb.append(") ASSERT ");
-            sb.append(properties.stream().map(k -> "n." + k).collect(Collectors.joining(", ")));
-            sb.append(" IS UNIQUE;");
-            return sb.toString();
-        }
-
-        String createIndexCypher() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("CREATE INDEX ON :");
-            sb.append(label);
-            sb.append("(");
-            sb.append(properties.stream().collect(Collectors.joining(", ")));
-            sb.append(");");
-            return sb.toString();
-        }
-
-        String createCypherStatement() {
-            if (uniqueConstraint) {
-                return createUniqueConstraintCypher();
-            } else {
-                return createIndexCypher();
-            }
-        }
-
-        String deleteCypherStatement() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("DROP INDEX ON :");
-            sb.append(label);
-            sb.append("(");
-            sb.append(properties.stream().collect(Collectors.joining(", ")));
-            sb.append(");");
-            return sb.toString();
         }
 
         @Override
@@ -86,37 +43,47 @@ class Neo4jIndexManagement {
         }
     }
 
-    Neo4jIndexManagement(Neo4jTransaction transaction, String namespace, Set<String> managedDomains) {
-        currentIndexes = new LinkedHashSet<>();
-        Result statementResult = transaction.executeCypher("CALL db.indexes");
-        statementResult.forEachRemaining(record -> {
-            Value labelValue = record.get("labelsOrTypes");
-            List<String> labels = labelValue.asList(Value::asString);
-            if (labels.size() > 0) {
-                String label = labels.get(0);
-                Value properties = record.get("properties");
-                List<String> propertyList = properties.asList(Value::asString);
-                currentIndexes.add(new Index(label, propertyList, !label.endsWith("_E")));
-            }
-        });
+    Neo4jIndexManagement(String namespace, Set<String> managedDomains) {
         wantedIndexes = new LinkedHashSet<>();
         for (String managedDomain : managedDomains) {
-            wantedIndexes.add(new Index(managedDomain, List.of("id"), true));
-            wantedIndexes.add(new Index(managedDomain + "_E", List.of("path", "hashOrValue"), false));
+            wantedIndexes.add(new Index(managedDomain + "_R", List.of("id"), true));
         }
     }
 
-    void createMissingIndices(Neo4jTransaction transaction) {
-        for (Index index : currentIndexes) {
-            if (!wantedIndexes.contains(index)) {
-                System.out.format("Not using index: %s. Use the following cypher statement to drop: %s%n", index.toString(), index.deleteCypherStatement());
-            }
-        }
+    void createIdIndices(Neo4jTransaction transaction) {
+        StringBuilder constraintParam = new StringBuilder();
+        StringBuilder indexParam = new StringBuilder();
+        constraintParam.append("{");
+        indexParam.append("{");
+        int c = 0;
+        int i = 0;
         for (Index index : wantedIndexes) {
-            if (!currentIndexes.contains(index)) {
-                String cypherStatement = index.createCypherStatement();
-                transaction.executeCypher(cypherStatement);
+            if (index.uniqueConstraint) {
+                buildIndexParam(constraintParam, index, c++);
+            } else {
+                buildIndexParam(indexParam, index, i++);
             }
         }
+        constraintParam.append("}");
+        indexParam.append("}");
+        transaction.executeCypher("CALL apoc.schema.assert(" + indexParam.toString() + ", " + constraintParam.toString() + ", true) YIELD label, key, keys, unique, action");
+    }
+
+    private void buildIndexParam(StringBuilder sb, Index index, int i) {
+        if (i > 0) {
+            sb.append(", ");
+        }
+        sb.append(index.label);
+        sb.append(": [");
+        int j = 0;
+        for (String property : index.properties) {
+            if (j++ > 0) {
+                sb.append(", ");
+            }
+            sb.append("'");
+            sb.append(property); // TODO quote
+            sb.append("'");
+        }
+        sb.append("]");
     }
 }
