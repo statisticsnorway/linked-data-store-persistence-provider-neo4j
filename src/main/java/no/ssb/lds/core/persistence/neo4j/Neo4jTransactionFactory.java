@@ -11,12 +11,12 @@ import org.neo4j.driver.SessionConfig;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
-public class Neo4jTransactionFactory implements TransactionFactory {
+class Neo4jTransactionFactory implements TransactionFactory {
 
-    private final Driver driver;
-    private final boolean logCypher;
+    final Driver driver;
+    final boolean logCypher;
 
-    public Neo4jTransactionFactory(Driver driver, boolean logCypher) {
+    Neo4jTransactionFactory(Driver driver, boolean logCypher) {
         this.driver = driver;
         this.logCypher = logCypher;
     }

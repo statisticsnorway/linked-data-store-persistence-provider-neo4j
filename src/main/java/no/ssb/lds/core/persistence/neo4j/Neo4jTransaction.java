@@ -29,6 +29,14 @@ class Neo4jTransaction implements Transaction {
     }
 
     @Override
+    public <T> T getInstance(Class<T> clazz) {
+        if (clazz.isAssignableFrom(org.neo4j.driver.Transaction.class)) {
+            return (T) neo4jTransaction;
+        }
+        return null;
+    }
+
+    @Override
     public CompletableFuture<TransactionStatistics> commit() {
         if (!result.isDone()) {
             try {

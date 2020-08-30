@@ -545,4 +545,12 @@ public class Neo4jPersistence implements RxJsonPersistence {
     public void close() throws PersistenceException {
         transactionFactory.close();
     }
+
+    @Override
+    public <T> T getInstance(Class<T> clazz) {
+        if (clazz.isAssignableFrom(org.neo4j.driver.Driver.class)) {
+            return (T) transactionFactory.driver;
+        }
+        return null;
+    }
 }
