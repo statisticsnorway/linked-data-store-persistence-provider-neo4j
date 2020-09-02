@@ -147,6 +147,11 @@ class Neo4jTransaction implements Transaction {
         }
         if (input instanceof Temporal) {
             sb.append("datetime('").append(input).append("')");
+            return;
+        }
+        if (input instanceof Boolean) {
+            sb.append(input);
+            return;
         }
     }
 
