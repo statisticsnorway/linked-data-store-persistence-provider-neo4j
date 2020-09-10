@@ -45,6 +45,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
 
     private static JsonDocument createJsonDocument(Map<String, FlattenedDocumentLeafNode> leafNodesByPath,
                                                    DocumentKey documentKey, boolean deleted) {
+        if (deleted) {
+            return new JsonDocument(documentKey, (JsonNode) null);
+        }
         FlattenedDocument flattenedDocument = new FlattenedDocument(documentKey, leafNodesByPath, deleted);
         JsonNode jsonObject = new FlattenedDocumentToJson(flattenedDocument).toJsonNode();
         return new JsonDocument(documentKey, jsonObject);
@@ -137,10 +140,9 @@ public class Neo4jPersistence implements RxJsonPersistence {
                 // Compute path.
                 return getPathFromRecord(record);
             }, record -> getLeafFromRecord(record, key)).map(values -> {
-                // Un-flatten. Note that we always mark the node as not deleted since the
-                // neo4j data model does not contain any deleted nodes. Not sure if that
-                // TODO: Check that this does not break the contract.
-                return createJsonDocument(new TreeMap<>(values), key, false);
+                // Un-flatten.
+                boolean deleted = values.size() == 1 && values.values().iterator().next().type() == FragmentType.DELETED;
+                return createJsonDocument(new TreeMap<>(values), key, deleted);
             }).toFlowable();
         });
     }
