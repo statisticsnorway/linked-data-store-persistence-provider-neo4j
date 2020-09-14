@@ -11,6 +11,9 @@ module no.ssb.lds.persistence.neo4j {
     requires io.reactivex.rxjava2;
     requires org.reactivestreams;
     requires graphql.java;
+    requires org.antlr.antlr4.runtime;
 
     provides PersistenceInitializer with Neo4jInitializer;
+
+    exports no.ssb.lds.cypher;
 }
