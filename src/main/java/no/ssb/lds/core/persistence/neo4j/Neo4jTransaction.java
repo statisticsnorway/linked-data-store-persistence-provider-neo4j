@@ -29,6 +29,14 @@ class Neo4jTransaction implements Transaction {
     }
 
     @Override
+    public <T> T getInstance(Class<T> clazz) {
+        if (clazz.isAssignableFrom(org.neo4j.driver.Transaction.class)) {
+            return (T) neo4jTransaction;
+        }
+        return null;
+    }
+
+    @Override
     public CompletableFuture<TransactionStatistics> commit() {
         if (!result.isDone()) {
             try {
@@ -139,6 +147,11 @@ class Neo4jTransaction implements Transaction {
         }
         if (input instanceof Temporal) {
             sb.append("datetime('").append(input).append("')");
+            return;
+        }
+        if (input instanceof Boolean) {
+            sb.append(input);
+            return;
         }
     }
 
