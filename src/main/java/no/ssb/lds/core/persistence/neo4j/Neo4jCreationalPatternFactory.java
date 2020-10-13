@@ -71,7 +71,7 @@ class Neo4jCreationalPatternFactory {
         StringBuilder cypher = new StringBuilder();
         cypher.append("UNWIND $batch AS record\n");
         cypher.append("MERGE (r:").append(entity).append("_R:RESOURCE {id: record[0]}) WITH r, record[1] AS version, record[2] AS data\n");
-        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF {from: version}]-(m)-[*]->(e:EMBEDDED) DETACH DELETE m, e WITH r, version, data\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF {from: version}]-(m) OPTIONAL MATCH (m)-[*]->(e:EMBEDDED) DETACH DELETE m, e WITH r, version, data\n");
         cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from <= version AND COALESCE(version < v.to, true) WITH r, version, data, v AS prevVersion\n");
         cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from > version WITH r, version, data, prevVersion, min(v.from) AS nextVersionFrom\n");
         cypher.append("FOREACH(d IN data |\n");
