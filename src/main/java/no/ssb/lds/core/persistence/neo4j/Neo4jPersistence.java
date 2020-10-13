@@ -1,6 +1,8 @@
 package no.ssb.lds.core.persistence.neo4j;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Maybe;
@@ -10,6 +12,8 @@ import no.ssb.lds.api.persistence.DocumentKey;
 import no.ssb.lds.api.persistence.PersistenceDeletePolicy;
 import no.ssb.lds.api.persistence.PersistenceException;
 import no.ssb.lds.api.persistence.Transaction;
+import no.ssb.lds.api.persistence.batch.Batch;
+import no.ssb.lds.api.persistence.batch.ExpressionVisitor;
 import no.ssb.lds.api.persistence.flattened.FlattenedDocument;
 import no.ssb.lds.api.persistence.flattened.FlattenedDocumentLeafNode;
 import no.ssb.lds.api.persistence.json.FlattenedDocumentToJson;
@@ -32,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -228,6 +233,151 @@ public class Neo4jPersistence implements RxJsonPersistence {
     @Override
     public Transaction createTransaction(boolean readOnly) throws PersistenceException {
         return transactionFactory.createTransaction(readOnly);
+    }
+
+    public Flowable<String> resolveMatchInBatchGroup(Transaction tx, Batch.DeleteGroup group, String namespace, Specification specification) {
+        final StringBuilder where = new StringBuilder();
+        final AtomicInteger pnum = new AtomicInteger();
+        final Map<String, Object> params = new LinkedHashMap<>();
+        group.evaluate(new ExpressionVisitor() {
+
+            @Override
+            public void enterMatch(ObjectNode matchNode) {
+            }
+
+            @Override
+            public void leaveMatch(ObjectNode matchNode) {
+            }
+
+            @Override
+            public void enterAnd(ObjectNode andNode, boolean first, boolean last) {
+                if (!first) {
+                    where.append(" AND ");
+                }
+                where.append("(");
+            }
+
+            @Override
+            public void leaveAnd(ObjectNode andNode, boolean first, boolean last) {
+                where.append(")");
+            }
+
+            @Override
+            public void enterOr(ObjectNode orNode, boolean first, boolean last) {
+                if (!first) {
+                    where.append(" OR ");
+                }
+                where.append("(");
+            }
+
+            @Override
+            public void leaveOr(ObjectNode orNode, boolean first, boolean last) {
+                where.append(")");
+            }
+
+            @Override
+            public void enterNot(ObjectNode notNode) {
+                where.append("NOT (");
+            }
+
+            @Override
+            public void leaveNot(ObjectNode notNode) {
+                where.append(")");
+            }
+
+            @Override
+            public void enterIdIn(TextNode idInNode, boolean first, boolean last) {
+                if (first) {
+                    pnum.incrementAndGet();
+                }
+                String paramIdentifier = "p" + pnum.get();
+                if (first && last) {
+                    where.append("r.id = $").append(paramIdentifier);
+                    params.put(paramIdentifier, idInNode.textValue());
+                } else {
+                    if (first) {
+                        where.append("any(x IN $").append(paramIdentifier).append(" WHERE r.id = x)");
+                        params.put(paramIdentifier, new ArrayList<>());
+                    }
+                    List<String> list = (List<String>) params.get(paramIdentifier);
+                    list.add(idInNode.textValue());
+                }
+            }
+
+            @Override
+            public void leaveIdIn(TextNode idInNode, boolean first, boolean last) {
+            }
+
+            @Override
+            public void enterIdNotIn(TextNode idNotInNode, boolean first, boolean last) {
+                if (first) {
+                    pnum.incrementAndGet();
+                }
+                String paramIdentifier = "p" + pnum.get();
+                if (first && last) {
+                    where.append("r.id <> $").append(paramIdentifier);
+                    params.put(paramIdentifier, idNotInNode.textValue());
+                } else {
+                    if (first) {
+                        where.append("none(x IN $").append(paramIdentifier).append(" WHERE r.id = x)");
+                        params.put(paramIdentifier, new ArrayList<>());
+                    }
+                    List<String> list = (List<String>) params.get(paramIdentifier);
+                    list.add(idNotInNode.textValue());
+                }
+            }
+
+            @Override
+            public void leaveIdNotIn(TextNode idNotInNode, boolean first, boolean last) {
+            }
+
+            @Override
+            public void enterIdStartsWith(TextNode startsWithNode) {
+                String paramIdentifier = "p" + pnum.incrementAndGet();
+                where.append("r.id STARTS WITH $").append(paramIdentifier);
+                params.put(paramIdentifier, startsWithNode.textValue());
+            }
+
+            @Override
+            public void leaveIdStartsWith(TextNode startsWithNode) {
+            }
+        });
+        if (params.isEmpty()) {
+            return Flowable.empty();
+        }
+        StringBuilder cypher = new StringBuilder();
+        String whereCriteria = where.toString();
+        cypher.append("MATCH (r:").append(group.type()).append("_R:RESOURCE) WHERE ").append(whereCriteria).append("\n");
+        cypher.append("MATCH (r").append(")<-[v:VERSION_OF]-(i) WHERE v.from <= $version AND COALESCE($version < v.to, true) AND COALESCE(NOT i._deleted, true)\n");
+        cypher.append("RETURN r.id AS id");
+        params.put("version", group.getTimestamp());
+        Neo4jTransaction neoTx = (Neo4jTransaction) tx;
+        return neoTx.executeCypherAsync(cypher.toString(), params).map(record -> record.get("id").asString());
+    }
+
+    @Override
+    public Completable deleteBatchGroup(Transaction transaction, Batch.DeleteGroup group, String namespace, Specification specification) {
+        if (group.entries().isEmpty()) {
+            return Completable.complete();
+        }
+        Neo4jTransaction tx = (Neo4jTransaction) transaction;
+        StringBuilder cypher = new StringBuilder();
+        cypher.append("UNWIND $entries AS entry\n");
+        cypher.append("MERGE (r:").append(group.type()).append("_R:RESOURCE {id: entry.id}) WITH r, entry.version AS version\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF {from: version}]-(m) OPTIONAL MATCH (m)-[*]->(e:EMBEDDED) DETACH DELETE m, e WITH r, version\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from <= version AND COALESCE(version < v.to, true) WITH r, v AS prevVersion, version\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from > version WITH r, prevVersion, min(v.from) AS nextVersionFrom, version\n");
+        cypher.append("CREATE (r)<-[v:VERSION_OF {from: version, to: coalesce(prevVersion.to, nextVersionFrom)}]-(m:")
+                .append(group.type()) // TODO do we need to label delete marker with all interfaces of the entity type?
+                .append(":INSTANCE").append(")\n");
+        cypher.append("SET prevVersion.to = version, m._deleted = true\n");
+        List<Map<String, Object>> entries = new ArrayList<>();
+        for (Batch.Entry entry : group.entries()) {
+            entries.add(Map.of("id", entry.id(), "version", entry.timestamp()));
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("entries", entries);
+        return tx.executeCypherAsync(cypher.toString(), params).ignoreElements();
     }
 
     @Override
