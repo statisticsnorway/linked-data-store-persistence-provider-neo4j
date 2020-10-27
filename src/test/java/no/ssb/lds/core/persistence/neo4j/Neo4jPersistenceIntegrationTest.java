@@ -29,7 +29,8 @@ public class Neo4jPersistenceIntegrationTest extends PersistenceIntegrationTest 
                         "neo4j.driver.username", "neo4j",
                         "neo4j.driver.password", "PasSW0rd",
                         "neo4j.cypher.show", "true"),
-                Set.of("Person", "Address", "FunkyLongAddress")
+                Set.of("Person", "Address", "FunkyLongAddress"),
+                null
         );
 
     }
