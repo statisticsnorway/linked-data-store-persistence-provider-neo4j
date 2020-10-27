@@ -8,6 +8,7 @@ import java.util.Set;
 class Neo4jIndexManagement {
 
     private final Set<Index> wantedIndexes;
+    private final boolean dropExisting;
 
     static class Index {
         final String label;
@@ -43,7 +44,8 @@ class Neo4jIndexManagement {
         }
     }
 
-    Neo4jIndexManagement(String namespace, Set<String> managedDomains) {
+    Neo4jIndexManagement(String namespace, Set<String> managedDomains, boolean dropExisting) {
+        this.dropExisting = dropExisting;
         wantedIndexes = new LinkedHashSet<>();
         for (String managedDomain : managedDomains) {
             wantedIndexes.add(new Index(managedDomain + "_R", List.of("id"), true));
@@ -66,7 +68,7 @@ class Neo4jIndexManagement {
         }
         constraintParam.append("}");
         indexParam.append("}");
-        transaction.executeCypher("CALL apoc.schema.assert(" + indexParam.toString() + ", " + constraintParam.toString() + ", true) YIELD label, key, keys, unique, action");
+        transaction.executeCypher("CALL apoc.schema.assert(" + indexParam.toString() + ", " + constraintParam.toString() + ", " + dropExisting + ") YIELD label, key, keys, unique, action");
     }
 
     private void buildIndexParam(StringBuilder sb, Index index, int i) {

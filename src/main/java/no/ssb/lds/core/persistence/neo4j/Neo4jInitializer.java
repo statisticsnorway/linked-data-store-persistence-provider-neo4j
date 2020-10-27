@@ -34,7 +34,8 @@ public class Neo4jInitializer implements PersistenceInitializer {
                 "neo4j.cypher.show",
                 "neo4j.driver.url",
                 "neo4j.driver.username",
-                "neo4j.driver.password"
+                "neo4j.driver.password",
+                "neo4j.schema.drop-existing-indexes"
         );
     }
 
@@ -45,9 +46,10 @@ public class Neo4jInitializer implements PersistenceInitializer {
         String neo4jDriverUsername = configuration.get("neo4j.driver.username");
         String neo4jDriverPassword = configuration.get("neo4j.driver.password");
         boolean logCypher = Boolean.parseBoolean(configuration.get("neo4j.cypher.show"));
+        boolean dropExistingIndexes = Boolean.parseBoolean(configuration.get("neo4j.schema.drop-existing-indexes"));
         Driver driver = open(neo4jDriverURL, neo4jDriverUsername, neo4jDriverPassword);
         Neo4jTransactionFactory transactionFactory = new Neo4jTransactionFactory(driver, logCypher);
-        Neo4jIndexManagement indexManagement = new Neo4jIndexManagement(defaultNamespace, managedDomains);
+        Neo4jIndexManagement indexManagement = new Neo4jIndexManagement(defaultNamespace, managedDomains, dropExistingIndexes);
         try (Neo4jTransaction tx = transactionFactory.createTransaction(false)) {
             indexManagement.createIdIndices(tx);
         } catch (RuntimeException e) {
