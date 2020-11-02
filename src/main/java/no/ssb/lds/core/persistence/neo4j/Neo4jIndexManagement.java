@@ -105,12 +105,12 @@ class Neo4jIndexManagement {
             int i = 0;
             for (Index index : wantedIndexes) {
                 if (index.uniqueConstraint) {
-                    if (constraintExists[c]) {
+                    if (!constraintExists[c]) {
                         constraintParam.put(index.label, index.properties);
                     }
                     c++;
                 } else {
-                    if (indexExists[i]) {
+                    if (!indexExists[i]) {
                         indexParam.put(index.label, index.properties);
                     }
                     i++;
