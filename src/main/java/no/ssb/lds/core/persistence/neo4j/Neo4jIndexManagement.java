@@ -76,7 +76,7 @@ class Neo4jIndexManagement {
 
         boolean[] indexExists = new boolean[indexes.size()];
         {
-            String indexExistsQuery = "UNWIND $indexes as i RETURN apoc.schema.node.indexExists(i.label, i.properties) AS e";
+            String indexExistsQuery = "UNWIND $indexes as i\nRETURN apoc.schema.node.indexExists(i.label, i.properties) AS e";
             Result indexExistsResult = transaction.executeCypher(indexExistsQuery, Map.of("indexes", indexes));
             int i = 0;
             for (Record record : indexExistsResult.list()) {
@@ -88,7 +88,7 @@ class Neo4jIndexManagement {
 
         boolean[] constraintExists = new boolean[constraints.size()];
         {
-            String constraintExistsQuery = "UNWIND $constraints as c RETURN apoc.schema.node.constraintExists(c.label, c.properties) AS e";
+            String constraintExistsQuery = "UNWIND $constraints as c\nRETURN apoc.schema.node.constraintExists(c.label, c.properties) AS e";
             Result constraintExistsResult = transaction.executeCypher(constraintExistsQuery, Map.of("constraints", constraints));
             int i = 0;
             for (Record record : constraintExistsResult.list()) {
