@@ -1,38 +1,34 @@
 package no.ssb.lds.core.persistence.neo4j;
 
-import java.util.LinkedHashSet;
+import org.neo4j.driver.Record;
+import org.neo4j.driver.Result;
+import org.neo4j.driver.Value;
+import org.neo4j.driver.summary.ResultSummary;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 
 class Neo4jIndexManagement {
 
-    private final Set<Index> wantedIndexes;
+    private static final Logger LOG = LoggerFactory.getLogger(Neo4jIndexManagement.class);
+
+    private final List<Index> wantedIndexes;
     private final boolean dropExisting;
 
     static class Index {
         final String label;
-        final Set<String> properties;
+        final List<String> properties;
         final boolean uniqueConstraint;
 
         Index(String label, List<String> properties, boolean uniqueConstraint) {
             this.label = label;
-            this.properties = new LinkedHashSet<>(properties);
+            this.properties = new ArrayList<>(properties);
             this.uniqueConstraint = uniqueConstraint;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Index index = (Index) o;
-            return label.equals(index.label) &&
-                    properties.equals(index.properties);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(label, properties);
         }
 
         @Override
@@ -44,48 +40,101 @@ class Neo4jIndexManagement {
         }
     }
 
-    Neo4jIndexManagement(String namespace, Set<String> managedDomains, boolean dropExisting) {
+    Neo4jIndexManagement(String namespace, Set<String> managedDomains, Map<String, Set<String>> customIndexes, boolean dropExisting) {
         this.dropExisting = dropExisting;
-        wantedIndexes = new LinkedHashSet<>();
+        wantedIndexes = new ArrayList<>();
         for (String managedDomain : managedDomains) {
             wantedIndexes.add(new Index(managedDomain + "_R", List.of("id"), true));
+        }
+        for (Map.Entry<String, Set<String>> fieldsByEntity : customIndexes.entrySet()) {
+            String entity = fieldsByEntity.getKey();
+            for (String field : fieldsByEntity.getValue()) {
+                wantedIndexes.add(new Index(entity, List.of(field), false));
+            }
         }
     }
 
     void createIdIndices(Neo4jTransaction transaction) {
-        StringBuilder constraintParam = new StringBuilder();
-        StringBuilder indexParam = new StringBuilder();
-        constraintParam.append("{");
-        indexParam.append("{");
-        int c = 0;
-        int i = 0;
-        for (Index index : wantedIndexes) {
-            if (index.uniqueConstraint) {
-                buildIndexParam(constraintParam, index, c++);
-            } else {
-                buildIndexParam(indexParam, index, i++);
-            }
-        }
-        constraintParam.append("}");
-        indexParam.append("}");
-        transaction.executeCypher("CALL apoc.schema.assert(" + indexParam.toString() + ", " + constraintParam.toString() + ", " + dropExisting + ") YIELD label, key, keys, unique, action");
-    }
+        // TODO https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues/1703
+        // TODO Until issue is fixed, we check which indexes and constraints that already exists and avoid including
+        // TODO them in apoc.schema.assert call below. This way we don't delete and recreate existing indexes.
 
-    private void buildIndexParam(StringBuilder sb, Index index, int i) {
-        if (i > 0) {
-            sb.append(", ");
-        }
-        sb.append(index.label);
-        sb.append(": [");
-        int j = 0;
-        for (String property : index.properties) {
-            if (j++ > 0) {
-                sb.append(", ");
+        List<Map<String, Object>> constraints = new ArrayList<>();
+        List<Map<String, Object>> indexes = new ArrayList<>();
+        {
+            for (Index index : wantedIndexes) {
+                LinkedHashMap<String, Object> map = new LinkedHashMap<>();
+                map.put("label", index.label);
+                map.put("properties", index.properties);
+                if (index.uniqueConstraint) {
+                    constraints.add(map);
+                } else {
+                    indexes.add(map);
+                }
             }
-            sb.append("'");
-            sb.append(property); // TODO quote
-            sb.append("'");
         }
-        sb.append("]");
+
+        boolean[] indexExists = new boolean[indexes.size()];
+        {
+            String indexExistsQuery = "UNWIND $indexes as i RETURN apoc.schema.node.indexExists(i.label, i.properties) AS e";
+            Result indexExistsResult = transaction.executeCypher(indexExistsQuery, Map.of("indexes", indexes));
+            int i = 0;
+            for (Record record : indexExistsResult.list()) {
+                indexExists[i++] = record.get("e").asBoolean();
+            }
+            ResultSummary summary = indexExistsResult.consume();
+            summary.counters();
+        }
+
+        boolean[] constraintExists = new boolean[constraints.size()];
+        {
+            String constraintExistsQuery = "UNWIND $constraints as c RETURN apoc.schema.node.constraintExists(c.label, c.properties) AS e";
+            Result constraintExistsResult = transaction.executeCypher(constraintExistsQuery, Map.of("constraints", constraints));
+            int i = 0;
+            for (Record record : constraintExistsResult.list()) {
+                constraintExists[i++] = record.get("e").asBoolean();
+            }
+            ResultSummary summary = constraintExistsResult.consume();
+            summary.counters();
+        }
+
+        Map<String, Object> indexParam = new LinkedHashMap<>();
+        Map<String, Object> constraintParam = new LinkedHashMap<>();
+        {
+            int c = 0;
+            int i = 0;
+            for (Index index : wantedIndexes) {
+                if (index.uniqueConstraint) {
+                    if (constraintExists[c]) {
+                        constraintParam.put(index.label, index.properties);
+                    }
+                    c++;
+                } else {
+                    if (indexExists[i]) {
+                        indexParam.put(index.label, index.properties);
+                    }
+                    i++;
+                }
+            }
+        }
+
+        Result result = transaction.executeCypher("CALL apoc.schema.assert($indexParam, $constraintParam, $dropExisting) YIELD label, key, keys, unique, action",
+                Map.of("indexParam", indexParam, "constraintParam", constraintParam, "dropExisting", false));
+        result.forEachRemaining(record -> {
+            String label = record.get("label").asString();
+            String key = record.get("key").asString();
+            List<String> keys = record.get("keys").asList(Value::asString);
+            boolean unique = record.get("unique").asBoolean();
+            String action = record.get("action").asString();
+            if ("KEPT".equalsIgnoreCase(action)) {
+                LOG.debug("Index {} - {} : {}{}", action, label, keys, unique ? " unique" : "");
+            } else {
+                LOG.info("Index {} - {} : {}{}", action, label, keys, unique ? " unique" : "");
+            }
+        });
+        ResultSummary summary = result.consume();
+        summary.counters();
+
+        // TODO if dropExisting is set, drop unwanted existing indexes and constraints
     }
 }

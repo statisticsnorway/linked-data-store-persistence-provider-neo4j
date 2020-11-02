@@ -12,6 +12,7 @@ module no.ssb.lds.persistence.neo4j {
     requires org.reactivestreams;
     requires graphql.java;
     requires org.antlr.antlr4.runtime;
+    requires org.slf4j;
 
     provides PersistenceInitializer with Neo4jInitializer;
 
