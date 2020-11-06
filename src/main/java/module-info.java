@@ -13,6 +13,7 @@ module no.ssb.lds.persistence.neo4j {
     requires graphql.java;
     requires org.antlr.antlr4.runtime;
     requires org.slf4j;
+    requires jackson.dataformat.msgpack;
 
     provides PersistenceInitializer with Neo4jInitializer;
 

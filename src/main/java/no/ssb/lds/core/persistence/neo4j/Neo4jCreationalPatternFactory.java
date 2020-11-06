@@ -1,6 +1,8 @@
 package no.ssb.lds.core.persistence.neo4j;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import graphql.language.FieldDefinition;
 import graphql.language.Node;
 import graphql.language.ObjectTypeDefinition;
@@ -13,6 +15,7 @@ import no.ssb.lds.api.persistence.json.JsonDocument;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElement;
 import no.ssb.lds.api.specification.SpecificationElementType;
+import org.msgpack.jackson.dataformat.MessagePackFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -29,11 +32,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static no.ssb.lds.core.persistence.neo4j.Constants.EMPTY_ARRAY_FIELD_PREFIX;
+import static no.ssb.lds.core.persistence.neo4j.Constants.MSGPACK_FIELD;
+
 class Neo4jCreationalPatternFactory {
 
-    static final String EMPTY_ARRAY_FIELD_PREFIX = "_lds_a_";
-
     private Map<SpecificationElement, String> creationalPatternByEntity = new ConcurrentHashMap<>();
+
+    static final ObjectMapper mapper = new ObjectMapper(new MessagePackFactory());
 
     Neo4jQueryAndParams creationalQueryAndParams(Specification specification, String entity, List<JsonDocument> documentForEntityList) {
         SpecificationElement entitySpecificationElement = specification.getRootElement().getProperties().get(entity);
@@ -48,6 +54,12 @@ class Neo4jCreationalPatternFactory {
             record.add(key.id());
             record.add(key.timestamp());
             record.add(data);
+            try {
+                byte[] msgpack = mapper.writeValueAsBytes(documentRootNode);
+                record.add(msgpack);
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
             batch.add(record);
         }
         Map<String, Object> params = Map.of(
@@ -70,12 +82,12 @@ class Neo4jCreationalPatternFactory {
         List<String> allTypesOfEntity = getAllTypesOfType(typeDefinitionRegistry, entity);
         StringBuilder cypher = new StringBuilder();
         cypher.append("UNWIND $batch AS record\n");
-        cypher.append("MERGE (r:").append(entity).append("_R:RESOURCE {id: record[0]}) WITH r, record[1] AS version, record[2] AS data\n");
-        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF {from: version}]-(m) OPTIONAL MATCH (m)-[*]->(e:EMBEDDED) DETACH DELETE m, e WITH r, version, data\n");
-        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from <= version AND COALESCE(version < v.to, true) WITH r, version, data, v AS prevVersion\n");
-        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from > version WITH r, version, data, prevVersion, min(v.from) AS nextVersionFrom\n");
+        cypher.append("MERGE (r:").append(entity).append("_R:RESOURCE {id: record[0]}) WITH r, record[1] AS version, record[2] AS data, record[3] AS msgpack\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF {from: version}]-(m) OPTIONAL MATCH (m)-[*]->(e:EMBEDDED) DETACH DELETE m, e WITH r, version, data, msgpack\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from <= version AND COALESCE(version < v.to, true) WITH r, version, data, msgpack, v AS prevVersion\n");
+        cypher.append("OPTIONAL MATCH (r").append(")<-[v:VERSION_OF]-() WHERE v.from > version WITH r, version, data, msgpack, prevVersion, min(v.from) AS nextVersionFrom\n");
         cypher.append("FOREACH(d IN data |\n");
-        cypher.append("  CREATE (r)<-[v:VERSION_OF {from: version, to: coalesce(prevVersion.to, nextVersionFrom)}]-(m:").append(String.join(":", allTypesOfEntity)).append(":INSTANCE").append(")\n");
+        cypher.append("  CREATE (r)<-[v:VERSION_OF {from: version, to: coalesce(prevVersion.to, nextVersionFrom)}]-(m:").append(String.join(":", allTypesOfEntity)).append(":INSTANCE").append(" {" + MSGPACK_FIELD + ": msgpack})\n");
         cypher.append("  SET prevVersion.to = version");
         int i = 0;
         for (Map.Entry<String, SpecificationElement> entry : specificationElement.getProperties().entrySet()) {

@@ -53,10 +53,6 @@ public class SpecificationBuilder {
         return mapElement;
     }
 
-    public static Specification createSpecificationAndRoot(Set<TestSpecificationElement> managedElements) {
-        return createSpecificationAndRoot(managedElements, null);
-    }
-
     public static Specification createSpecificationAndRoot(Set<TestSpecificationElement> managedElements, String sdl) {
         TestSpecificationElement root = new TestSpecificationElement(
                 "root",

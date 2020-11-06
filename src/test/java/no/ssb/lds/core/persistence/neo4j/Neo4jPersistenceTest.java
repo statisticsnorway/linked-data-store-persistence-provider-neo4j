@@ -6,6 +6,7 @@ import no.ssb.lds.api.persistence.DocumentKey;
 import no.ssb.lds.api.persistence.json.JsonDocument;
 import no.ssb.lds.api.specification.Specification;
 import no.ssb.lds.api.specification.SpecificationElementType;
+import org.testng.annotations.Ignore;
 import org.testng.annotations.Test;
 
 import java.io.IOException;
@@ -137,163 +138,272 @@ public class Neo4jPersistenceTest {
     @Test
     public void simpleMap() throws IOException {
         JsonNode node = loadJson("simple-map.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "SimpleMap", Set.of(
-                        stringNode("one"),
-                        stringNode("two"),
-                        stringNode("three")
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "SimpleMap", Set.of(
+                                stringNode("one"),
+                                stringNode("two"),
+                                stringNode("three")
+                        ))
+                ),
+                "type SimpleMap @domain {\n" +
+                        "  one: String\n" +
+                        "  two: String\n" +
+                        "  three: String\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void deeplyNestedMap() throws IOException {
         JsonNode node = loadJson("deeply-nested-map.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "DeeplyNestedMap", Set.of(
-                        objectNode("the", Set.of(
-                                objectNode("very", Set.of(
-                                        objectNode("nested", Set.of(
-                                                stringNode("one"),
-                                                stringNode("two"),
-                                                stringNode("three")
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "DeeplyNestedMap", Set.of(
+                                objectNode("the", Set.of(
+                                        objectNode("very", Set.of(
+                                                objectNode("nested", Set.of(
+                                                        stringNode("one"),
+                                                        stringNode("two"),
+                                                        stringNode("three")
+                                                ))
                                         ))
                                 ))
                         ))
-                ))
-        ));
+                ),
+                "type DeeplyNestedMap @domain {\n" +
+                        "  the: The\n" +
+                        "}\n" +
+                        "type The {\n" +
+                        "  very: Very\n" +
+                        "}\n" +
+                        "type Very {\n" +
+                        "  nested: Nested\n" +
+                        "}\n" +
+                        "type Nested {\n" +
+                        "  one: String\n" +
+                        "  two: String\n" +
+                        "  three: String\n" +
+                        "}\n"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void simpleArray() throws IOException {
         JsonNode node = loadJson("simple-array.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "SimpleArray", Set.of(
-                        arrayNode("the", stringNode("[]"))
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "SimpleArray", Set.of(
+                                arrayNode("the", stringNode("[]"))
+                        ))
+                ),
+                "type SimpleArray @domain {\n" +
+                        "  the: [String]\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void simpleRef() throws IOException {
         JsonNode node = loadJson("simple-ref.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "SimpleRef", Set.of(
-                        refNode("foo", Set.of("Target"))
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "SimpleRef", Set.of(
+                                refNode("foo", Set.of("Target"))
+                        ))
+                ),
+                "type SimpleRef @domain {\n" +
+                        "  foo: Target @link\n" +
+                        "}\n" +
+                        "type Target @domain {\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void nestedSimpleRef() throws IOException {
         JsonNode node = loadJson("nested-simple-ref.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "NestedSimpleRef", Set.of(
-                        objectNode("here", Set.of(
-                                refNode("foo", Set.of("Target"))
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "NestedSimpleRef", Set.of(
+                                objectNode("here", Set.of(
+                                        refNode("foo", Set.of("Target"))
+                                ))
                         ))
-                ))
-        ));
+                ),
+                "type NestedSimpleRef @domain {\n" +
+                        "  here: Here\n" +
+                        "}\n" +
+                        "type Here {\n" +
+                        "  foo: Target @link\n" +
+                        "}\n" +
+                        "type Target @domain {\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void arrayRef() throws IOException {
         JsonNode node = loadJson("array-ref.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "ArrayRef", Set.of(
-                        arrayRefNode("foo", Set.of("Target"), stringNode("[]"))
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "ArrayRef", Set.of(
+                                arrayRefNode("foo", Set.of("Target"), stringNode("[]"))
+                        ))
+                ),
+                "type ArrayRef @domain {\n" +
+                        "  foo: [Target] @link\n" +
+                        "}\n" +
+                        "type Target @domain {\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void nestedArrayRef() throws IOException {
         JsonNode node = loadJson("nested-array-ref.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "ArrayRef", Set.of(
-                        objectNode("here", Set.of(
-                                arrayRefNode("foo", Set.of("Target"), stringNode("[]"))
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "ArrayRef", Set.of(
+                                objectNode("here", Set.of(
+                                        arrayRefNode("foo", Set.of("Target"), stringNode("[]"))
+                                ))
                         ))
-                ))
-        ));
+                ),
+                "type ArrayRef @domain {\n" +
+                        "  here: Here\n" +
+                        "}\n" +
+                        "type Here {\n" +
+                        "  foo: [Target] @link\n" +
+                        "}\n" +
+                        "type Target @domain {\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void nullArray() throws IOException {
         JsonNode node = loadJson("null-array.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "NullArray", Set.of(
-                        arrayNode("the", objectNode("[]", Set.of(
-                                stringNode("one"),
-                                stringNode("two")
-                        ))),
-                        stringNode("name")
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "NullArray", Set.of(
+                                arrayNode("the", objectNode("[]", Set.of(
+                                        stringNode("one"),
+                                        stringNode("two")
+                                ))),
+                                stringNode("name")
+                        ))
+                ),
+                "type NullArray @domain {\n" +
+                        "  the: [The]\n" +
+                        "  name: String\n" +
+                        "}\n" +
+                        "type The {\n" +
+                        "  one: String\n" +
+                        "  two: String\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void emptyArray() throws IOException {
         JsonNode node = loadJson("empty-array.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "EmptyArray", Set.of(
-                        arrayNode("the", objectNode("[]", Set.of(
-                                stringNode("one"),
-                                stringNode("two")
-                        ))),
-                        stringNode("name")
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "EmptyArray", Set.of(
+                                arrayNode("the", objectNode("[]", Set.of(
+                                        stringNode("one"),
+                                        stringNode("two")
+                                ))),
+                                stringNode("name")
+                        ))
+                ),
+                "type EmptyArray @domain {\n" +
+                        "  the: [The]\n" +
+                        "  name: String\n" +
+                        "}\n" +
+                        "type The {\n" +
+                        "  one: String\n" +
+                        "  two: String\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void missingArray() throws IOException {
         JsonNode node = loadJson("missing-array.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "MissingArray", Set.of(
-                        arrayNode("the", objectNode("[]", Set.of(
-                                stringNode("one"),
-                                stringNode("two")
-                        ))),
-                        stringNode("name")
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "MissingArray", Set.of(
+                                arrayNode("the", objectNode("[]", Set.of(
+                                        stringNode("one"),
+                                        stringNode("two")
+                                ))),
+                                stringNode("name")
+                        ))
+                ),
+                "type MissingArray @domain {\n" +
+                        "  the: [The]\n" +
+                        "  name: String\n" +
+                        "}\n" +
+                        "type The {\n" +
+                        "  one: String\n" +
+                        "  two: String\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
     public void emptyDocument() throws IOException {
         JsonNode node = loadJson("empty-document.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "EmptyDocument", Set.of(
-                        arrayNode("the", objectNode("[]", Set.of(
-                                stringNode("one"),
-                                stringNode("two")
-                        ))),
-                        stringNode("firstname"),
-                        stringNode("lastname")
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "EmptyDocument", Set.of(
+                                arrayNode("the", objectNode("[]", Set.of(
+                                        stringNode("one"),
+                                        stringNode("two")
+                                ))),
+                                stringNode("firstname"),
+                                stringNode("lastname")
+                        ))
+                ),
+                "type EmptyDocument @domain {\n" +
+                        "  the: [The]\n" +
+                        "  firstname: String\n" +
+                        "  lastname: String\n" +
+                        "}\n" +
+                        "type The {\n" +
+                        "  one: String\n" +
+                        "  two: String\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
     @Test
+    @Ignore // nested arrays are unsupported in LDS because it is unsupported by GraphQL.
     public void deeplyNestedArray() throws IOException {
         JsonNode node = loadJson("deeply-nested-array.json");
-        Specification specification = createSpecificationAndRoot(Set.of(
-                objectNode(SpecificationElementType.MANAGED, "DeeplyNestedArray", Set.of(
-                        arrayNode("the", arrayNode("[]", arrayNode("[]", stringNode("[]"))))
-                ))
-        ));
+        Specification specification = createSpecificationAndRoot(
+                Set.of(
+                        objectNode(SpecificationElementType.MANAGED, "DeeplyNestedArray", Set.of(
+                                arrayNode("the", arrayNode("[]", arrayNode("[]", stringNode("[]"))))
+                        ))
+                ),
+                "type DeeplyNestedArray @domain {\n" +
+                        "  the: [[[String]]]\n" +
+                        "}"
+        );
         createAndPresentCypher(specification, node, "1");
     }
 
